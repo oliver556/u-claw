@@ -347,6 +347,57 @@ func TestStoreSaveNewAPIAccountUpsertsMapping(t *testing.T) {
 	}
 }
 
+func TestStoreFindNewAPIAccountReturnsMapping(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+	rotatedAt := time.Date(2026, 8, 27, 1, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT uclaw_user_id, newapi_base_url, newapi_user_id, newapi_username, token_fingerprint, token_rotated_at")).
+		WithArgs(int64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"uclaw_user_id",
+			"newapi_base_url",
+			"newapi_user_id",
+			"newapi_username",
+			"token_fingerprint",
+			"token_rotated_at",
+		}).AddRow(int64(5), "https://api.example.com/v1", int64(9), "13800138000", "fingerprint", rotatedAt))
+
+	account, ok, err := store.FindNewAPIAccount(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("FindNewAPIAccount() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("FindNewAPIAccount() ok = false, want true")
+	}
+	if account.UClawUserID != 5 || account.NewAPIBaseURL != "https://api.example.com/v1" || account.NewAPIUserID != 9 || account.NewAPIUsername != "13800138000" || account.TokenFingerprint != "fingerprint" || !account.TokenRotatedAt.Equal(rotatedAt) {
+		t.Fatalf("account = %+v", account)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreFindNewAPIAccountReturnsFalseWhenMissing(t *testing.T) {
+	store, mock, cleanup := newMockStore(t)
+	defer cleanup()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT uclaw_user_id, newapi_base_url, newapi_user_id, newapi_username, token_fingerprint, token_rotated_at")).
+		WithArgs(int64(5)).
+		WillReturnError(sql.ErrNoRows)
+
+	account, ok, err := store.FindNewAPIAccount(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("FindNewAPIAccount() error = %v", err)
+	}
+	if ok || account.UClawUserID != 0 {
+		t.Fatalf("account=%+v ok=%t, want missing", account, ok)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestStoreListActivationCodesReturnsCodeAndAccountMapping(t *testing.T) {
 	store, mock, cleanup := newMockStore(t)
 	defer cleanup()

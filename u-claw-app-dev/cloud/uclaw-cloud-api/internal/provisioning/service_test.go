@@ -15,6 +15,13 @@ import (
 type memoryAccountStore struct {
 	account Account
 	saved   bool
+	found   bool
+	findErr error
+}
+
+// FindNewAPIAccount returns a preloaded mapping for provisioning idempotency tests.
+func (s *memoryAccountStore) FindNewAPIAccount(_ context.Context, _ int64) (Account, bool, error) {
+	return s.account, s.found, s.findErr
 }
 
 // SaveNewAPIAccount records the mapping for provisioning unit tests.
@@ -164,6 +171,68 @@ func TestProvisionNewAPIContinuesWhenUserAlreadyExists(t *testing.T) {
 	}
 	if !store.saved {
 		t.Fatal("mapping was not saved")
+	}
+}
+
+func TestProvisionNewAPISkipsInitialQuotaWhenMappingAlreadyExists(t *testing.T) {
+	var manageCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"success":false,"message":"ERROR: duplicate key value violates unique constraint \"users_username_key\" (SQLSTATE 23505)"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/user/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":9,"username":"13800138000"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"access_token":"user-access-token"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":12,"name":"uclaw-main"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/token/12/key":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"key":"real-key-value"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
+			manageCalls++
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	admin, err := newapi.NewClient(server.URL, "admin-token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	store := &memoryAccountStore{
+		found: true,
+		account: Account{
+			UClawUserID:    5,
+			NewAPIBaseURL:  server.URL + "/v1",
+			NewAPIUserID:   9,
+			NewAPIUsername: "13800138000",
+		},
+	}
+	service, err := NewService(admin, store, Config{
+		ClientBaseURL:  server.URL + "/v1",
+		TokenName:      "uclaw-main",
+		InitialQuota:   100000,
+		PasswordSecret: "test-password-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	result, err := service.ProvisionNewAPI(context.Background(), activation.ProvisionRequest{UserID: 5, Phone: "13800138000"})
+	if err != nil {
+		t.Fatalf("ProvisionNewAPI() error = %v", err)
+	}
+	if result.Token != "sk-real-key-value" {
+		t.Fatalf("result = %+v", result)
+	}
+	if manageCalls != 0 {
+		t.Fatalf("AddQuota calls = %d, want 0 for an existing New API user", manageCalls)
 	}
 }
 
