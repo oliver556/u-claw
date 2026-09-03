@@ -2026,6 +2026,12 @@ async function exerciseWorkbench(page, imagePath) {
       const openSessionButton = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("打开会话"));
       const carousel = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated-grid"));
       const warningBubble = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-warning-bubble"));
+      const configSummaryChips = allNodes().filter(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.classList.contains("chip") &&
+          node.closest(".uclaw-ecommerce-config-panel .uclaw-ecommerce-panel-head"),
+      );
       const carouselStyle = carousel ? getComputedStyle(carousel) : null;
       const request = window.__uclawEcommerceRequests?.[0] || null;
       const promptRequest = window.__uclawEcommercePromptPackRequests?.[0] || null;
@@ -2146,6 +2152,7 @@ async function exerciseWorkbench(page, imagePath) {
         assetRowColumns: assetRow ? getComputedStyle(assetRow).gridTemplateColumns : "",
         layoutColumns: layout ? getComputedStyle(layout).gridTemplateColumns : "",
         visibleStatCount: visibleStats.length,
+        configSummaryChipCount: configSummaryChips.length,
         visibleUpdateBannerCount: visibleUpdateBanners.length,
         fileCount: files.length,
         productNameValue: inputs.find((node) => node.placeholder === "如：便携榨汁杯")?.value || "",
@@ -2339,8 +2346,14 @@ async function runAcceptance(options) {
         }
       }
       if (state.typeCardCount !== 3) throw new Error(`${viewport.name}: Expected three output type cards, got ${state.typeCardCount}`);
-      const countMaxWidth = viewport.name === "mobile" ? 74 : 82;
-      if (!state.countRects?.length || state.countRects.some((rect) => rect.width > countMaxWidth)) {
+      const countMaxWidth = viewport.name === "mobile" ? 120 : 112;
+      if (state.configSummaryChipCount !== 0) {
+        throw new Error(`${viewport.name}: Config header should not show duplicate style/ratio chips, got ${state.configSummaryChipCount}`);
+      }
+      if (
+        !state.countRects?.length ||
+        state.countRects.some((rect) => rect.width > countMaxWidth || rect.height > 32)
+      ) {
         throw new Error(`${viewport.name}: Count selector should stay compact, got ${JSON.stringify(state.countRects)}`);
       }
       if (viewport.name === "mobile" && state.typeRects?.some((rect) => rect.width > viewport.width - 48)) {

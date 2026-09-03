@@ -2439,8 +2439,8 @@ function patchServiceWorker() {
     "ecommerce-record-density-1-ecommerce-record-tombstone-1",
   );
   source = source.replace(
-    /ecommerce-record-tombstone-1(?!-ecommerce-prompt-pack-workbench-1)/,
-    "ecommerce-record-tombstone-1-ecommerce-prompt-pack-workbench-1",
+    /ecommerce-record-tombstone-1(?!-ecommerce-prompt-pack-workbench-2)/,
+    "ecommerce-record-tombstone-1-ecommerce-prompt-pack-workbench-2",
   );
   source = source.replace(/const CONTROL_CACHE_LIMIT = \d+;/, "const CONTROL_CACHE_LIMIT = 1;");
   source = source
@@ -2952,7 +2952,7 @@ function patchTasksPageEcommerceWorkflow() {
     "if(E&&q&&!s.length)y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成中</strong><span>${A.done||0}/${A.total||g} · ${q.current||`排队中`}</span></div></div><div class='uclaw-ecommerce-progress'><div><span style=${`width:${x}%`}></span></div><small>${x}% · 出一张显示一张</small></div><div class='uclaw-ecommerce-empty'>首张图生成完成后会自动出现在这里。</div></section>`;",
     "if(o?.error&&!s.length)y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>${r.label} · ${o.name||t.productName||`待生成商品`}</span></div></div><div class='banner banner-error'>${o.error}</div></section>`;",
     "else if(s.length){let v=Math.max(0,Math.min(Number(e.ecommercePreviewIndex)||0,s.length-1)),f=s[v]||s[0],w=UcEcommerceDownloadFileName(o,f,v),C=e.ecommerceSwiperOpen===!0,N=A.status===`partial`?`部分生成`:o.platform_label+` 已生成图片`; y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>${E?`正在生成`:N}</strong><span>${o.name} · ${s.length}${A.total?`/${A.total}`:``} 张结果 · ${o.language?.label||S.label} · ${o.visual_style?.label||V.label} · ${o.aspect_ratio?.label||R.label} · ${o.model||`默认图片模型`}</span></div><div class='uclaw-ecommerce-result-actions'><button class='btn primary' type='button' ?disabled=${E} @click=${()=>e.downloadEcommercePackage?.()}>打包下载</button><button class='btn' type='button' @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div></div>${E&&q?i`<div class='uclaw-ecommerce-progress'><div><span style=${`width:${x}%`}></span></div><small>${A.done||s.length}/${A.total||g} · ${q.current||`继续生成中`} · 出一张显示一张</small></div>`:``}<div class='uclaw-ecommerce-result-body'><figure class='uclaw-ecommerce-featured'><button class='uclaw-ecommerce-featured-preview' type='button' title='点击放大' aria-label='点击放大当前图片' @click=${()=>e.openEcommerceSwiper?.(v)}><img src=${f.dataUrl||f.url} alt=${f.title||`生成图`}><span>点击放大</span></button><figcaption><div><strong>${f.title||`生成图`}</strong><span>${f.type||`image`} · ${f.model||o.model||``}</span></div><button class='btn' type='button' @click=${()=>e.downloadEcommerceImage?.(f,w)}>下载</button></figcaption></figure></div><div class='uclaw-ecommerce-result-strip'><div class='uclaw-ecommerce-generated-grid' aria-label='生成结果横向列表'>${s.map((t,n)=>i`<figure class='uclaw-ecommerce-generated ${n===v?`is-selected`:``}' role='button' tabindex='0' title='点击预览' aria-current=${n===v?`true`:`false`} @click=${()=>e.selectEcommercePreview?.(n)} @keydown=${r=>{(r.key===`Enter`||r.key===` `)&&(r.preventDefault(),e.selectEcommercePreview?.(n))}}><img src=${t.dataUrl||t.url} alt=${t.title||`生成图`}><figcaption><strong>${t.title||`生成图`}</strong><span>${t.type||`image`} · 点击预览</span></figcaption></figure>`)}</div></div>${o.warnings?.length?i`<div class='banner banner-warn'>${o.warnings.join(`；`)}</div>`:``}<div class='uclaw-ecommerce-qa'>${o.qa.map(e=>i`<span>${e}</span>`)}</div>${C?i`<div class='uclaw-ecommerce-swiper' role='dialog' aria-modal='true' tabindex='0' @click=${t=>{t.currentTarget===t.target&&e.closeEcommerceSwiper?.()}} @keydown=${t=>e.onEcommerceSwiperKey?.(t)}><div class='uclaw-ecommerce-swiper-stage'><button class='uclaw-ecommerce-swiper-close' type='button' aria-label='关闭预览' @click=${()=>e.closeEcommerceSwiper?.()}>×</button><button class='uclaw-ecommerce-swiper-nav is-prev' type='button' aria-label='上一张' @click=${()=>e.stepEcommerceSwiper?.(-1)}>‹</button><figure><img src=${f.dataUrl||f.url} alt=${f.title||`生成图`}><figcaption><strong>${f.title||`生成图`}</strong><span>${v+1}/${s.length} · ${f.type||`image`} · ${f.model||o.model||``}</span></figcaption></figure><button class='uclaw-ecommerce-swiper-nav is-next' type='button' aria-label='下一张' @click=${()=>e.stepEcommerceSwiper?.(1)}>›</button><div class='uclaw-ecommerce-swiper-strip'>${s.map((t,n)=>i`<button class='${n===v?`is-selected`:``}' type='button' @click=${()=>e.selectEcommercePreview?.(n)}><img src=${t.dataUrl||t.url} alt=${t.title||`生成图`}></button>`)}</div></div></div>`:``}</section>`}",
-      "return i`<section class='uclaw-ecommerce-workbench' data-uclaw-ecommerce-workbench='prompt-pack' data-uclaw-ecommerce-platform=${t.platform} data-uclaw-ecommerce-language=${S.id} data-uclaw-ecommerce-visual-style=${V.id} data-uclaw-ecommerce-aspect-ratio=${R.id} tabindex='0' @paste=${t=>e.onEcommercePaste?.(t)}><div class='uclaw-ecommerce-hero'><div><div class='card-title'>电商主图/详情图</div><div class='card-sub'>先生成 Prompt Pack，确认后再出图；少操作，但扣费前能看懂方向。</div></div><div class='uclaw-ecommerce-stats'><div class='uclaw-ecommerce-stat'><span>当前平台</span><strong>${r.label}</strong></div><div class='uclaw-ecommerce-stat'><span>计划输出</span><strong>${g} 张/屏</strong></div><div class='uclaw-ecommerce-stat'><span>Prompt</span><strong>${K?UcEcommercePromptApprovedSlots(K).length+`/${H.length}`:`待生成`}</strong></div></div></div><div class='uclaw-ecommerce-layout'><section class='uclaw-ecommerce-panel uclaw-ecommerce-config-panel'><div class='uclaw-ecommerce-panel-head'><div><strong>任务输入</strong><span>平台规则、商品信息、素材和输出张数。</span></div><div class='uclaw-ecommerce-summary'><span class='chip chip-ok'>${V.label}</span><span class='chip chip-ok'>${R.label}</span></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-grid'><label class='field'><span>平台</span><select class='input' .value=${t.platform} @change=${n=>e.onEcommerceField?.(`platform`,n.target.value)}>${n.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片语言</span><select class='input' .value=${S.id} @change=${t=>e.onEcommerceField?.(`language`,t.target.value)}>${b.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片风格</span><select class='input' .value=${V.id} @change=${t=>e.onEcommerceField?.(`visualStyle`,t.target.value)}>${P.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片比例</span><select class='input' .value=${R.id} @change=${t=>e.onEcommerceField?.(`aspectRatio`,t.target.value)}>${T.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>商品名称</span><input class='input' placeholder='如：便携榨汁杯' .value=${t.productName} @input=${t=>e.onEcommerceField?.(`productName`,t.target.value)}></label><label class='field'><span>类目</span><input class='input' placeholder='如：厨房小电' .value=${t.category} @input=${t=>e.onEcommerceField?.(`category`,t.target.value)}></label><label class='field'><span>目标人群</span><input class='input' placeholder='默认可不填' .value=${t.audience} @input=${t=>e.onEcommerceField?.(`audience`,t.target.value)}></label></div></div><div class='uclaw-ecommerce-section'><label class='field'><span>核心卖点</span><textarea class='input uclaw-ecommerce-textarea' placeholder='每行一个卖点；没有名称时至少填写这里' .value=${t.sellingPoints} @input=${t=>e.onEcommerceField?.(`sellingPoints`,t.target.value)}></textarea></label></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-rules'><div><strong>主图规格</strong><span>${r.main}</span></div><div><strong>详情图规格</strong><span>${r.detail}</span></div><div><strong>规则来源</strong><span>${r.source_type} / ${r.confidence}</span></div></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-types'><strong>生成类型与数量</strong><div class='uclaw-ecommerce-type-grid'>${c.map(n=>{let r=m[n.type],a=p[n.type],o=d.includes(n.type),s=n.type===`detail_image`?`屏数`:`数量`,l=n.type===`detail_image`?`建议 5-9 屏系列`:n.type===`model_image`?`建议 1-3 张`:r.max>=7?`建议 6 张以上`:`建议 3-5 张`;return i`<label class='uclaw-ecommerce-type ${o?`is-active`:``}'><span class='uclaw-ecommerce-type-check'><input type='checkbox' .checked=${o} @change=${t=>e.onEcommerceOutputType?.(n.type,t.target.checked)}><b>${n.label}</b></span><small>${n.description}</small><span class='uclaw-ecommerce-count' @click=${e=>e.stopPropagation()}><span>${s}</span><span class='uclaw-ecommerce-stepper'><button type='button' ?disabled=${!o||a<=r.min} @click=${t=>{t.preventDefault(),t.stopPropagation(),e.onEcommerceOutputCount?.(n.type,a-1)}}>-</button><input class='input' type='number' min=${r.min} max=${r.max} .value=${String(a)} ?disabled=${!o} @input=${t=>e.onEcommerceOutputCount?.(n.type,t.target.value)}><button type='button' ?disabled=${!o||a>=r.max} @click=${t=>{t.preventDefault(),t.stopPropagation(),e.onEcommerceOutputCount?.(n.type,a+1)}}>+</button></span><em>${r.unit}</em></span><em>${l}</em></label>`})}</div></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-upload'><div class='uclaw-ecommerce-upload-head'><div><strong>商品图片</strong><span>${t.files.length?`${t.files.length} 张已选择`:`上传实拍图、包装图或细节图`}</span></div></div><div class='uclaw-ecommerce-asset-row'><label class='uclaw-ecommerce-drop' @dragover=${e=>e.preventDefault()} @drop=${t=>e.onEcommerceDrop?.(t)}><input class='uclaw-ecommerce-file-input' type='file' accept='image/*' multiple @change=${t=>e.onEcommerceFiles?.(t.target.files)}><b>选择/拖拽/粘贴图片</b><span>最多 12 张</span></label>${t.files.length?i`<div class='uclaw-ecommerce-file-grid'>${t.files.map((t,n)=>i`<figure class='uclaw-ecommerce-file'><img src=${t.url} alt=${t.name}><figcaption><span>${t.name}</span><small>${UcEcommerceFormatFileSize(t.size)}</small></figcaption><button class='btn ghost' type='button' @click=${()=>e.removeEcommerceFile?.(n)}>移除</button></figure>`)}</div>`:i`<div class='uclaw-ecommerce-empty'>可点击选择、拖拽，或 Cmd/Ctrl+V 粘贴。</div>`}</div></div></div><div class='uclaw-ecommerce-section'><div class='row'><button class='btn primary' type='button' ?disabled=${F.disabled} @click=${()=>e.startEcommerceImageGeneration?.()}>${F.label}</button>${F.hint?i`<span class='muted'>${F.hint}</span>`:i`<span class='muted'>${d.map(e=>`${c.find(t=>t.type===e)?.label||e}${p[e]||0}${m[e]?.unit||`张`}`).join(`、`)} · ${S.label} · ${V.label} · ${R.label}</span>`}</div></div></section><section class='uclaw-ecommerce-panel uclaw-ecommerce-prompt-panel'><div class='uclaw-ecommerce-panel-head'><div><strong>Prompt Pack</strong><span>${K?UcEcommercePromptPackSummary(K):`先生成提示词，再确认生图。`}</span></div><div class='uclaw-ecommerce-summary'>${K?i`<button class='btn ghost' type='button' @click=${()=>e.approveAllEcommercePromptSlots?.()}>全部通过</button><button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptPack?.()}>重生整组</button>`:``}</div></div>${e.ecommercePromptGenerating?i`<div class='uclaw-ecommerce-empty'>正在生成 Prompt Pack，不会扣图片额度。</div>`:K?i`<div class='uclaw-ecommerce-prompt-body'><div class='uclaw-ecommerce-prompt-list'>${H.map(t=>i`<article class='uclaw-ecommerce-prompt-card ${Y?.id===t.id?`is-selected`:``}' @click=${()=>e.selectEcommercePromptSlot?.(t.id)}><header><b>${t.id}</b><strong>${t.title}</strong><span class='chip ${UcEcommercePromptSlotStatusClass(t.reviewStatus)}'>${UcEcommercePromptSlotStatusText(t.reviewStatus)}</span></header><p>${UcEcommerceSlotTypeLabel(t.type)} · ${t.purpose||`image`} · ${t.size||``}</p></article>`)}</div>${Y?i`<article class='uclaw-ecommerce-prompt-detail'><header><div><b>${Y.id}</b><strong>${Y.title}</strong><span>${Y.template}</span></div><span class='chip ${UcEcommercePromptSlotStatusClass(Y.reviewStatus)}'>${UcEcommercePromptSlotStatusText(Y.reviewStatus)}</span></header>${e.ecommercePromptEditingId===Y.id?i`<textarea class='input uclaw-ecommerce-prompt-editor' .value=${e.ecommercePromptDrafts?.[Y.id]??Y.prompt} @input=${t=>e.onEcommercePromptDraft?.(Y.id,t.target.value)}></textarea><div class='uclaw-ecommerce-prompt-actions'><button class='btn primary' type='button' @click=${()=>e.saveEcommercePromptSlot?.(Y.id)}>保存</button><button class='btn ghost' type='button' @click=${()=>e.cancelEcommercePromptEdit?.()}>取消</button></div>`:i`<pre>${Y.prompt}</pre><div class='uclaw-ecommerce-prompt-actions'><button class='btn primary' type='button' @click=${()=>e.approveEcommercePromptSlot?.(Y.id)}>通过</button><button class='btn ghost' type='button' @click=${()=>e.editEcommercePromptSlot?.(Y.id)}>编辑</button><button class='btn ghost' type='button' @click=${()=>e.rejectEcommercePromptSlot?.(Y.id)}>拒绝</button>${String(e.ecommercePromptRegenerateConfirmId||``)===String(Y.id||``)?i`<button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptSlot?.(Y.id)}>确认重生</button><button class='btn ghost' type='button' @click=${()=>e.cancelRegenerateEcommercePromptSlot?.()}>取消</button>`:i`<button class='btn ghost' type='button' @click=${()=>e.requestRegenerateEcommercePromptSlot?.(Y.id)}>重生此张</button>`}</div>`}<div class='uclaw-ecommerce-qa'>${(Y.qa||[]).map(e=>i`<span>${e}</span>`)}</div></article>`:``}</div>`:i`<div class='uclaw-ecommerce-empty'>点击左侧按钮生成每张图片的标题、用途、构图 Prompt 和 QA。确认前不会调用图片接口。</div>`}</section><aside class='uclaw-ecommerce-side'>${y}<section class='uclaw-ecommerce-records'><div class='uclaw-ecommerce-result-head'><div><strong>生成记录</strong><span>${l.length?`最近 ${l.length} 条`:`暂无记录`}</span></div><button class='btn ghost' type='button' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}>清空</button></div>${l.length?i`<div class='uclaw-ecommerce-record-list'>${l.map(t=>{let n=UcEcommerceRecordPlannedCount(t),r=UcEcommerceRecordGeneratedCount(t),a=UcEcommerceRecordHasBillingError(t);return i`<article class='uclaw-ecommerce-record'><div><strong>${t.productName||`未命名商品`}</strong><span>${t.platformLabel} · ${new Date(t.createdAt).toLocaleString()}</span><small>${t.outputLabels||`默认类型`} · ${t.languageLabel||t.result?.language?.label||``} · ${t.imageCount} 张素材 · 计划 ${n||0} 张/屏 · 已出 ${r||0} 张${a?` · 扣费异常`:``} · ${t.model||`默认图片模型`}</small></div><div class='uclaw-ecommerce-record-actions'><span class='chip ${UcEcommerceStatusChip(t)}'>${UcEcommerceRecordStatusText(t)}</span>${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>`})}</div>`:i`<div class='uclaw-ecommerce-empty'>生成后会在这里保留平台、商品、生成类型、计划数量、素材数量和图片结果。</div>`}</section></aside></div></section>`}",
+      "return i`<section class='uclaw-ecommerce-workbench' data-uclaw-ecommerce-workbench='prompt-pack' data-uclaw-ecommerce-platform=${t.platform} data-uclaw-ecommerce-language=${S.id} data-uclaw-ecommerce-visual-style=${V.id} data-uclaw-ecommerce-aspect-ratio=${R.id} tabindex='0' @paste=${t=>e.onEcommercePaste?.(t)}><div class='uclaw-ecommerce-hero'><div><div class='card-title'>电商主图/详情图</div><div class='card-sub'>先生成 Prompt Pack，确认后再出图；少操作，但扣费前能看懂方向。</div></div><div class='uclaw-ecommerce-stats'><div class='uclaw-ecommerce-stat'><span>当前平台</span><strong>${r.label}</strong></div><div class='uclaw-ecommerce-stat'><span>计划输出</span><strong>${g} 张/屏</strong></div><div class='uclaw-ecommerce-stat'><span>Prompt</span><strong>${K?UcEcommercePromptApprovedSlots(K).length+`/${H.length}`:`待生成`}</strong></div></div></div><div class='uclaw-ecommerce-layout'><section class='uclaw-ecommerce-panel uclaw-ecommerce-config-panel'><div class='uclaw-ecommerce-panel-head'><div><strong>任务输入</strong><span>平台规则、商品信息、素材和输出张数。</span></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-grid'><label class='field'><span>平台</span><select class='input' .value=${t.platform} @change=${n=>e.onEcommerceField?.(`platform`,n.target.value)}>${n.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片语言</span><select class='input' .value=${S.id} @change=${t=>e.onEcommerceField?.(`language`,t.target.value)}>${b.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片风格</span><select class='input' .value=${V.id} @change=${t=>e.onEcommerceField?.(`visualStyle`,t.target.value)}>${P.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>图片比例</span><select class='input' .value=${R.id} @change=${t=>e.onEcommerceField?.(`aspectRatio`,t.target.value)}>${T.map(e=>i`<option value=${e.id}>${e.label}</option>`)}</select></label><label class='field'><span>商品名称</span><input class='input' placeholder='如：便携榨汁杯' .value=${t.productName} @input=${t=>e.onEcommerceField?.(`productName`,t.target.value)}></label><label class='field'><span>类目</span><input class='input' placeholder='如：厨房小电' .value=${t.category} @input=${t=>e.onEcommerceField?.(`category`,t.target.value)}></label><label class='field'><span>目标人群</span><input class='input' placeholder='默认可不填' .value=${t.audience} @input=${t=>e.onEcommerceField?.(`audience`,t.target.value)}></label></div></div><div class='uclaw-ecommerce-section'><label class='field'><span>核心卖点</span><textarea class='input uclaw-ecommerce-textarea' placeholder='每行一个卖点；没有名称时至少填写这里' .value=${t.sellingPoints} @input=${t=>e.onEcommerceField?.(`sellingPoints`,t.target.value)}></textarea></label></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-rules'><div><strong>主图规格</strong><span>${r.main}</span></div><div><strong>详情图规格</strong><span>${r.detail}</span></div><div><strong>规则来源</strong><span>${r.source_type} / ${r.confidence}</span></div></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-types'><strong>生成类型与数量</strong><div class='uclaw-ecommerce-type-grid'>${c.map(n=>{let r=m[n.type],a=p[n.type],o=d.includes(n.type),s=n.type===`detail_image`?`屏数`:`数量`,l=n.type===`detail_image`?`建议 5-9 屏系列`:n.type===`model_image`?`建议 1-3 张`:r.max>=7?`建议 6 张以上`:`建议 3-5 张`;return i`<label class='uclaw-ecommerce-type ${o?`is-active`:``}'><span class='uclaw-ecommerce-type-check'><input type='checkbox' .checked=${o} @change=${t=>e.onEcommerceOutputType?.(n.type,t.target.checked)}><b>${n.label}</b></span><small>${n.description}</small><span class='uclaw-ecommerce-count' @click=${e=>e.stopPropagation()}><span>${s}</span><span class='uclaw-ecommerce-stepper'><button type='button' aria-label='减少${n.label}' ?disabled=${!o||a<=r.min} @click=${t=>{t.preventDefault(),t.stopPropagation(),e.onEcommerceOutputCount?.(n.type,a-1)}}>-</button><input class='input' type='number' min=${r.min} max=${r.max} .value=${String(a)} ?disabled=${!o} @input=${t=>e.onEcommerceOutputCount?.(n.type,t.target.value)}><button type='button' aria-label='增加${n.label}' ?disabled=${!o||a>=r.max} @click=${t=>{t.preventDefault(),t.stopPropagation(),e.onEcommerceOutputCount?.(n.type,a+1)}}>+</button></span><em>${r.unit}</em></span><em>${l}</em></label>`})}</div></div></div><div class='uclaw-ecommerce-section'><div class='uclaw-ecommerce-upload'><div class='uclaw-ecommerce-upload-head'><div><strong>商品图片</strong><span>${t.files.length?`${t.files.length} 张已选择`:`上传实拍图、包装图或细节图`}</span></div></div><div class='uclaw-ecommerce-asset-row'><label class='uclaw-ecommerce-drop' @dragover=${e=>e.preventDefault()} @drop=${t=>e.onEcommerceDrop?.(t)}><input class='uclaw-ecommerce-file-input' type='file' accept='image/*' multiple @change=${t=>e.onEcommerceFiles?.(t.target.files)}><b>选择/拖拽/粘贴图片</b><span>最多 12 张</span></label>${t.files.length?i`<div class='uclaw-ecommerce-file-grid'>${t.files.map((t,n)=>i`<figure class='uclaw-ecommerce-file'><img src=${t.url} alt=${t.name}><figcaption><span>${t.name}</span><small>${UcEcommerceFormatFileSize(t.size)}</small></figcaption><button class='btn ghost' type='button' @click=${()=>e.removeEcommerceFile?.(n)}>移除</button></figure>`)}</div>`:i`<div class='uclaw-ecommerce-empty'>可点击选择、拖拽，或 Cmd/Ctrl+V 粘贴。</div>`}</div></div></div><div class='uclaw-ecommerce-section'><div class='row'><button class='btn primary' type='button' ?disabled=${F.disabled} @click=${()=>e.startEcommerceImageGeneration?.()}>${F.label}</button>${F.hint?i`<span class='muted'>${F.hint}</span>`:i`<span class='muted'>${d.map(e=>`${c.find(t=>t.type===e)?.label||e}${p[e]||0}${m[e]?.unit||`张`}`).join(`、`)} · ${S.label} · ${V.label} · ${R.label}</span>`}</div></div></section><section class='uclaw-ecommerce-panel uclaw-ecommerce-prompt-panel'><div class='uclaw-ecommerce-panel-head'><div><strong>Prompt Pack</strong><span>${K?UcEcommercePromptPackSummary(K):`先生成提示词，再确认生图。`}</span></div><div class='uclaw-ecommerce-summary'>${K?i`<button class='btn ghost' type='button' @click=${()=>e.approveAllEcommercePromptSlots?.()}>全部通过</button><button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptPack?.()}>重生整组</button>`:``}</div></div>${e.ecommercePromptGenerating?i`<div class='uclaw-ecommerce-empty'>正在生成 Prompt Pack，不会扣图片额度。</div>`:K?i`<div class='uclaw-ecommerce-prompt-body'><div class='uclaw-ecommerce-prompt-list'>${H.map(t=>i`<article class='uclaw-ecommerce-prompt-card ${Y?.id===t.id?`is-selected`:``}' @click=${()=>e.selectEcommercePromptSlot?.(t.id)}><header><b>${t.id}</b><strong>${t.title}</strong><span class='chip ${UcEcommercePromptSlotStatusClass(t.reviewStatus)}'>${UcEcommercePromptSlotStatusText(t.reviewStatus)}</span></header><p>${UcEcommerceSlotTypeLabel(t.type)} · ${t.purpose||`image`} · ${t.size||``}</p></article>`)}</div>${Y?i`<article class='uclaw-ecommerce-prompt-detail'><header><div><b>${Y.id}</b><strong>${Y.title}</strong><span>${Y.template}</span></div><span class='chip ${UcEcommercePromptSlotStatusClass(Y.reviewStatus)}'>${UcEcommercePromptSlotStatusText(Y.reviewStatus)}</span></header>${e.ecommercePromptEditingId===Y.id?i`<textarea class='input uclaw-ecommerce-prompt-editor' .value=${e.ecommercePromptDrafts?.[Y.id]??Y.prompt} @input=${t=>e.onEcommercePromptDraft?.(Y.id,t.target.value)}></textarea><div class='uclaw-ecommerce-prompt-actions'><button class='btn primary' type='button' @click=${()=>e.saveEcommercePromptSlot?.(Y.id)}>保存</button><button class='btn ghost' type='button' @click=${()=>e.cancelEcommercePromptEdit?.()}>取消</button></div>`:i`<pre>${Y.prompt}</pre><div class='uclaw-ecommerce-prompt-actions'><button class='btn primary' type='button' @click=${()=>e.approveEcommercePromptSlot?.(Y.id)}>通过</button><button class='btn ghost' type='button' @click=${()=>e.editEcommercePromptSlot?.(Y.id)}>编辑</button><button class='btn ghost' type='button' @click=${()=>e.rejectEcommercePromptSlot?.(Y.id)}>拒绝</button>${String(e.ecommercePromptRegenerateConfirmId||``)===String(Y.id||``)?i`<button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptSlot?.(Y.id)}>确认重生</button><button class='btn ghost' type='button' @click=${()=>e.cancelRegenerateEcommercePromptSlot?.()}>取消</button>`:i`<button class='btn ghost' type='button' @click=${()=>e.requestRegenerateEcommercePromptSlot?.(Y.id)}>重生此张</button>`}</div>`}<div class='uclaw-ecommerce-qa'>${(Y.qa||[]).map(e=>i`<span>${e}</span>`)}</div></article>`:``}</div>`:i`<div class='uclaw-ecommerce-empty'>点击左侧按钮生成每张图片的标题、用途、构图 Prompt 和 QA。确认前不会调用图片接口。</div>`}</section><aside class='uclaw-ecommerce-side'>${y}<section class='uclaw-ecommerce-records'><div class='uclaw-ecommerce-result-head'><div><strong>生成记录</strong><span>${l.length?`最近 ${l.length} 条`:`暂无记录`}</span></div><button class='btn ghost' type='button' ?disabled=${l.length===0} @click=${()=>e.clearEcommerceRecords?.()}>清空</button></div>${l.length?i`<div class='uclaw-ecommerce-record-list'>${l.map(t=>{let n=UcEcommerceRecordPlannedCount(t),r=UcEcommerceRecordGeneratedCount(t),a=UcEcommerceRecordHasBillingError(t);return i`<article class='uclaw-ecommerce-record'><div><strong>${t.productName||`未命名商品`}</strong><span>${t.platformLabel} · ${new Date(t.createdAt).toLocaleString()}</span><small>${t.outputLabels||`默认类型`} · ${t.languageLabel||t.result?.language?.label||``} · ${t.imageCount} 张素材 · 计划 ${n||0} 张/屏 · 已出 ${r||0} 张${a?` · 扣费异常`:``} · ${t.model||`默认图片模型`}</small></div><div class='uclaw-ecommerce-record-actions'><span class='chip ${UcEcommerceStatusChip(t)}'>${UcEcommerceRecordStatusText(t)}</span>${t.result?i`<button class='btn' type='button' @click=${()=>e.showEcommerceRecord?.(t)}>查看结果</button>`:``}</div></article>`})}</div>`:i`<div class='uclaw-ecommerce-empty'>生成后会在这里保留平台、商品、生成类型、计划数量、素材数量和图片结果。</div>`}</section></aside></div></section>`}",
   ].join("");
   redesignedWorkbenchView = redesignedWorkbenchView
     .replace(
@@ -9138,13 +9138,13 @@ openclaw-tasks-page .uclaw-ecommerce-type {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 74px;
-  max-height: 96px;
-  gap: 6px 10px;
+  min-height: 66px;
+  max-height: 86px;
+  gap: 5px 10px;
   align-content: start;
-  grid-template-columns: minmax(0, 1fr) 68px;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto auto 1fr;
-  padding: 9px 9px 9px 11px;
+  padding: 8px 10px 8px 11px;
   border: 1px solid #d7e1ed;
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
@@ -9203,48 +9203,57 @@ openclaw-tasks-page .uclaw-ecommerce-type-check b {
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count {
-  display: grid;
+  box-sizing: border-box;
+  display: flex;
   min-width: 0;
-  width: 68px;
-  gap: 3px;
+  width: auto;
+  height: 26px;
+  gap: 5px;
   align-items: center;
   align-self: center;
   justify-self: end;
   grid-column: 2;
   grid-row: 1 / 4;
-  grid-template-columns: minmax(0, 1fr);
-  padding: 4px;
-  border: 1px solid #e6edf7;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.74);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count span {
-  grid-column: 1 / -1;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: 26px;
   text-align: center;
-  line-height: 1;
+  line-height: 26px;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count span,
 openclaw-tasks-page .uclaw-ecommerce-count em {
+  box-sizing: border-box;
   color: #66758a;
   font-size: 10px;
+  font-style: normal;
+  line-height: 26px;
   text-align: center;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-stepper {
+  box-sizing: border-box;
   display: grid;
   overflow: hidden;
-  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  width: 54px;
+  grid-template-columns: 15px 24px 15px;
   align-items: center;
   border: 1px solid #dfe8f4;
   border-radius: 6px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.86);
 }
 
 openclaw-tasks-page .uclaw-ecommerce-stepper button {
-  width: 16px;
-  height: 22px;
+  box-sizing: border-box;
+  width: 15px;
+  height: 24px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -9263,9 +9272,10 @@ openclaw-tasks-page .uclaw-ecommerce-stepper button:disabled {
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count input {
-  width: 100%;
-  height: 22px;
-  min-height: 22px;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
   border: 0 !important;
   border-radius: 0;
@@ -9273,6 +9283,7 @@ openclaw-tasks-page .uclaw-ecommerce-count input {
   text-align: center;
   font-size: 13px;
   font-weight: 700;
+  line-height: 24px;
   box-shadow: none;
   appearance: textfield;
 }
@@ -10217,14 +10228,16 @@ openclaw-tasks-page .uclaw-ecommerce-record-pagination span {
 
   openclaw-tasks-page .uclaw-ecommerce-type {
     width: 100%;
-    min-height: 76px;
+    min-height: 74px;
     max-height: none;
-    grid-template-columns: minmax(0, 1fr) 68px;
+    grid-template-columns: minmax(0, 1fr);
     padding: 10px;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-count {
-    width: 68px;
+    justify-self: start;
+    grid-column: 1;
+    grid-row: auto;
   }
 
   openclaw-tasks-page .uclaw-ecommerce-type small,

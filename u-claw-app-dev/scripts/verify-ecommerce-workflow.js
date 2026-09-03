@@ -1136,7 +1136,7 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-confirm-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-density-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-tombstone-1");
-  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-prompt-pack-workbench-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-prompt-pack-workbench-2");
 }
 
 /**
