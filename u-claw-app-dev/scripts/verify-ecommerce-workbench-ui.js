@@ -931,6 +931,7 @@ async function verifyCompactRecordRail(page) {
       const mark = record?.querySelector(".uclaw-ecommerce-record-mark");
       const rowRect = record?.getBoundingClientRect();
       const style = record ? getComputedStyle(record) : null;
+      const statusStyle = status ? getComputedStyle(status) : null;
       return {
         rowText: (record?.innerText || record?.textContent || "").replace(/\\s+/g, " ").trim(),
         rowWidth: Math.round(rowRect?.width || 0),
@@ -943,6 +944,9 @@ async function verifyCompactRecordRail(page) {
         progressAria: progress?.getAttribute("aria-label") || "",
         actionsWidth: Math.round(actions?.getBoundingClientRect?.().width || 0),
         statusWidth: Math.round(status?.getBoundingClientRect?.().width || 0),
+        statusHeight: Math.round(status?.getBoundingClientRect?.().height || 0),
+        statusWhiteSpace: statusStyle?.whiteSpace || "",
+        statusText: (status?.innerText || status?.textContent || "").replace(/\\s+/g, " ").trim(),
         markWidth: Math.round(mark?.getBoundingClientRect?.().width || 0),
         gridTemplateAreas: style?.gridTemplateAreas || "",
         gridTemplateColumns: style?.gridTemplateColumns || "",
@@ -961,6 +965,9 @@ async function verifyCompactRecordRail(page) {
   }
   if (state.markWidth < 24 || state.statusWidth < 54 || state.progressWidth < 70 || state.actionButtonCount < 3) {
     throw new Error(`Compact record areas are missing or collapsed: ${JSON.stringify(state)}`);
+  }
+  if (state.statusText !== "部分生成" || state.statusWidth > 78 || state.statusHeight > 26 || state.statusWhiteSpace !== "nowrap") {
+    throw new Error(`Compact partial status chip should stay small and readable: ${JSON.stringify(state)}`);
   }
   await evaluateWithRetry(page, () => {
     localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
@@ -1304,6 +1311,150 @@ async function verifyLocalManifestReplacesStalePartialRecord(page) {
   if (state.storedImageCount !== 5 || state.storedGeneratedImageCount !== 5 || state.storedHasRemoteUrl) {
     throw new Error(`Local manifest replacement did not persist the full local index: ${JSON.stringify(state)}`);
   }
+}
+
+/**
+ * Verifies deleting a local-manifest-backed record is durable across remounts.
+ * The actual image files stay on disk, but their manifest must not reappear in
+ * the workbench once the user deleted that history row.
+ */
+async function verifyDeletedLocalManifestRecordStaysDeleted(page) {
+  await evaluateWithRetry(page, () => {
+    const localDir = "/tmp/uclaw-ecommerce-deleted-manifest";
+    const record = {
+      id: "deleted-manifest-record",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      status: "completed",
+      platform: "douyin",
+      platformLabel: "抖音电商",
+      productName: "删除后不复活服",
+      languageLabel: "中文",
+      outputLabels: "主图1张",
+      requestedOutputCount: 1,
+      generatedImageCount: 1,
+      model: "gpt-image-2",
+      localDir,
+      localManifestPath: `${localDir}/manifest.json`,
+      result: {
+        id: "deleted-manifest-record",
+        requestId: "deleted-manifest-record",
+        platform: "douyin",
+        platform_label: "抖音电商",
+        name: "删除后不复活服",
+        model: "gpt-image-2",
+        localDir,
+        localManifestPath: `${localDir}/manifest.json`,
+        images: [
+          {
+            id: "deleted-manifest-image-1",
+            type: "main_image",
+            title: "主图1张",
+            model: "gpt-image-2",
+            mimeType: "image/png",
+            localPath: `${localDir}/01-main.png`,
+            localDir,
+            localFileName: "01-main.png",
+          },
+        ],
+        warnings: [],
+        billing: { status: "ok" },
+        progress: { done: 1, total: 1, status: "completed" },
+        qa: ["人工复核"],
+      },
+    };
+    localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
+    localStorage.removeItem("uclaw.ecommerceImageRecordDeletes.v1");
+    window.__uclawEcommerceLocalManifestCalls = 0;
+    window.__uclawEcommerceLocalManifestRecords = [record];
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "删除后不复活服", 10000);
+
+  await evaluateInDom(
+    page,
+    `
+      const record = allNodes().find(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.classList.contains("uclaw-ecommerce-record") &&
+          (node.innerText || node.textContent || "").includes("删除后不复活服"),
+      );
+      const deleteButton = record?.querySelector(".uclaw-ecommerce-record-delete");
+      if (!deleteButton) throw new Error("No delete record button");
+      deleteButton.click();
+      return true;
+    `,
+  );
+  await evaluateInDom(
+    page,
+    `
+      const record = allNodes().find(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.classList.contains("uclaw-ecommerce-record") &&
+          (node.innerText || node.textContent || "").includes("删除后不复活服"),
+      );
+      const confirm = record?.querySelector(".uclaw-ecommerce-record-delete-confirm");
+      if (!confirm) throw new Error("No delete confirm button");
+      confirm.click();
+      return true;
+    `,
+  );
+  await page.waitForFunction(() => {
+    const visit = (root = document, out = []) => {
+      for (const child of root.children || []) {
+        out.push(child);
+        if (child.shadowRoot) visit(child.shadowRoot, out);
+        visit(child, out);
+      }
+      return out;
+    };
+    return !visit().some((node) => node instanceof HTMLElement && (node.innerText || node.textContent || "").includes("删除后不复活服"));
+  }, null, { timeout: 5000 });
+
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/settings/ai-agents");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page.waitForFunction(() => !document.querySelector("openclaw-tasks-page"), null, { timeout: 10000 });
+  await evaluateWithRetry(page, () => {
+    window.history.pushState({}, "", "/tasks");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitForText(page, "创建生成任务", 10000);
+
+  const state = await evaluateInDom(
+    page,
+    `
+      const allText = allNodes().map((node) => node instanceof HTMLElement ? (node.innerText || node.textContent || "") : "").join("\\n");
+      const storedRecords = JSON.parse(localStorage.getItem("uclaw.ecommerceImageRecords.v1") || "[]");
+      const tombstones = JSON.parse(localStorage.getItem("uclaw.ecommerceImageRecordDeletes.v1") || "[]");
+      return {
+        hasDeletedRecordText: allText.includes("删除后不复活服"),
+        storedRecordCount: Array.isArray(storedRecords) ? storedRecords.length : -1,
+        tombstones,
+        localManifestCalls: window.__uclawEcommerceLocalManifestCalls || 0,
+      };
+    `,
+  );
+  if (state.hasDeletedRecordText || state.storedRecordCount !== 0) {
+    throw new Error(`Deleted manifest-backed record reappeared after remount: ${JSON.stringify(state)}`);
+  }
+  for (const key of ["deleted-manifest-record", `${"/tmp/uclaw-ecommerce-deleted-manifest"}/manifest.json`, "/tmp/uclaw-ecommerce-deleted-manifest"]) {
+    if (!state.tombstones.includes(key)) {
+      throw new Error(`Deleted record tombstone missing key ${key}: ${JSON.stringify(state)}`);
+    }
+  }
+  await page.evaluate(() => {
+    localStorage.removeItem("uclaw.ecommerceImageRecordDeletes.v1");
+  });
 }
 
 /**
@@ -1768,6 +1919,9 @@ async function runAcceptance(options) {
       await verifyUsageSyncRetry(page);
       await installDirectImageApiStub(page);
       await verifyLocalPathOnlyRecordHydration(page);
+      await installDirectImageApiStub(page);
+      await verifyDeletedLocalManifestRecordStaysDeleted(page);
+      await installDirectImageApiStub(page);
       const state = await exerciseWorkbench(page, imagePath);
 
       if (!state.hasWorkbench) throw new Error(`${viewport.name}: Workbench host missing`);
@@ -1907,7 +2061,7 @@ async function runAcceptance(options) {
       }
       if (!state.fullTextIncludesLocalSaved) throw new Error(`${viewport.name}: Local saved state missing`);
       if (state.deleteRecordButtonCount < 1) throw new Error(`${viewport.name}: Delete record button missing`);
-      if (!state.recordIconButtonRects?.length || state.recordIconButtonRects.some((rect) => rect.width > 38 || rect.height > 38)) {
+      if (!state.recordIconButtonRects?.length || state.recordIconButtonRects.some((rect) => rect.width > 32 || rect.height > 32)) {
         throw new Error(`${viewport.name}: Record actions should render as compact icon buttons, got ${JSON.stringify(state.recordIconButtonRects)}`);
       }
       for (const label of ["查看结果", "打开文件夹", "删除记录"]) {
@@ -2102,13 +2256,175 @@ async function runAcceptance(options) {
       if (!openLocalState.some((payload) => String(payload?.path || "").includes("/tmp/uclaw-ecommerce-fixture"))) {
         throw new Error(`${viewport.name}: Open local folder did not call desktop API, got ${JSON.stringify(openLocalState)}`);
       }
+      const deleteTargetState = await evaluateInDom(
+        page,
+        `
+          const isVisible = (node) => {
+            if (!(node instanceof HTMLElement)) return false;
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          };
+          const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record") && isVisible(node));
+          const target = rows.find((node) => isVisible(node.querySelector(".uclaw-ecommerce-record-delete")));
+          const button = target?.querySelector(".uclaw-ecommerce-record-delete");
+          if (!button) throw new Error("No visible delete record button");
+          button.click();
+          const targetTitle = (target.querySelector("strong")?.innerText || target.querySelector("strong")?.textContent || "").trim();
+          return {
+            rowCount: rows.length,
+            targetTitle,
+            targetText: (target.innerText || target.textContent || "").replace(/\\s+/g, " ").trim(),
+          };
+        `,
+      );
+      const deleteConfirmState = await evaluateInDom(
+        page,
+        `
+          const isVisible = (node) => {
+            if (!(node instanceof HTMLElement)) return false;
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          };
+          const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record") && isVisible(node));
+          const record = rows.find((node) => isVisible(node.querySelector(".uclaw-ecommerce-record-delete-confirm")));
+          const confirm = record?.querySelector(".uclaw-ecommerce-record-delete-confirm");
+          const cancel = record?.querySelector(".uclaw-ecommerce-record-delete-cancel");
+          const actions = confirm?.closest(".uclaw-ecommerce-record-actions");
+          const hiddenActions = actions
+            ? ["uclaw-ecommerce-record-view", "uclaw-ecommerce-record-sync", "uclaw-ecommerce-record-folder"].filter((className) => {
+                const node = actions.querySelector("." + className);
+                return node && getComputedStyle(node).display === "none";
+              })
+            : [];
+          const confirmRect = confirm?.getBoundingClientRect();
+          const confirmStyle = confirm ? getComputedStyle(confirm) : null;
+          const cancelRect = cancel?.getBoundingClientRect();
+          return {
+            rowCount: rows.length,
+            hasConfirm: Boolean(confirm),
+            hasCancel: Boolean(cancel),
+            confirmLabel: (confirm?.innerText || confirm?.textContent || "").trim(),
+            confirmAria: confirm?.getAttribute("aria-label") || "",
+            confirmTitle: confirm?.getAttribute("title") || "",
+            confirmWidth: Math.round(confirmRect?.width || 0),
+            confirmHeight: Math.round(confirmRect?.height || 0),
+            confirmColor: confirmStyle?.color || "",
+            confirmBackground: confirmStyle?.backgroundColor || "",
+            confirmWhiteSpace: confirmStyle?.whiteSpace || "",
+            cancelWidth: Math.round(cancelRect?.width || 0),
+            hiddenActionCount: hiddenActions.length,
+          };
+        `,
+      );
+      if (
+        deleteConfirmState.rowCount !== deleteTargetState.rowCount ||
+        !deleteConfirmState.hasConfirm ||
+        !deleteConfirmState.hasCancel ||
+        deleteConfirmState.confirmLabel !== "确认删除" ||
+        !deleteConfirmState.confirmTitle.includes("本地图片不会删除") ||
+        deleteConfirmState.confirmWidth > 78 ||
+        deleteConfirmState.confirmHeight > 30 ||
+        deleteConfirmState.cancelWidth > 32 ||
+        deleteConfirmState.confirmWhiteSpace !== "nowrap" ||
+        !/rgb\(255, 255, 255\)/.test(deleteConfirmState.confirmColor) ||
+        !/rgb\(220, 38, 38\)|rgb\(185, 28, 28\)/.test(deleteConfirmState.confirmBackground)
+      ) {
+        throw new Error(`${viewport.name}: First delete click should ask for compact confirmation, got ${JSON.stringify(deleteConfirmState)}`);
+      }
       await evaluateInDom(
         page,
         `
-          const buttons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete"));
-          if (!buttons.length) throw new Error("No delete record button");
-          for (const button of buttons) button.click();
-          return buttons.length;
+          const isVisible = (node) => {
+            if (!(node instanceof HTMLElement)) return false;
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          };
+          const confirmButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete-confirm") && isVisible(node));
+          if (!confirmButtons.length) throw new Error("No visible confirm delete button");
+          confirmButtons[0].click();
+          return true;
+        `,
+      );
+      await page.waitForFunction(
+        (targetTitle) => {
+          const visit = (root = document, out = []) => {
+            for (const child of root.children || []) {
+              out.push(child);
+              if (child.shadowRoot) visit(child.shadowRoot, out);
+              visit(child, out);
+            }
+            return out;
+          };
+          return !visit().some((node) => {
+            if (!(node instanceof HTMLElement) || !node.classList.contains("uclaw-ecommerce-record")) return false;
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+            return visible && (node.innerText || node.textContent || "").includes(targetTitle);
+          });
+        },
+        deleteTargetState.targetTitle,
+        { timeout: 5000 },
+      );
+      await evaluateInDom(
+        page,
+        `
+          const clear = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-clear"));
+          if (clear) clear.click();
+          return true;
+        `,
+      );
+      const clearConfirmState = await evaluateInDom(
+        page,
+        `
+          const rows = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+          const confirm = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-clear-confirm"));
+          const cancel = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-clear-cancel"));
+          const confirmRect = confirm?.getBoundingClientRect();
+          const confirmStyle = confirm ? getComputedStyle(confirm) : null;
+          const cancelRect = cancel?.getBoundingClientRect();
+          const actions = confirm?.closest(".uclaw-ecommerce-record-clear-actions");
+          return {
+            rowCount: rows.length,
+            hasConfirm: Boolean(confirm),
+            hasCancel: Boolean(cancel),
+            confirmLabel: (confirm?.innerText || confirm?.textContent || "").trim(),
+            confirmTitle: confirm?.getAttribute("title") || "",
+            confirmWidth: Math.round(confirmRect?.width || 0),
+            confirmHeight: Math.round(confirmRect?.height || 0),
+            confirmColor: confirmStyle?.color || "",
+            confirmBackground: confirmStyle?.backgroundColor || "",
+            confirmWhiteSpace: confirmStyle?.whiteSpace || "",
+            cancelWidth: Math.round(cancelRect?.width || 0),
+            actionsDisplay: actions ? getComputedStyle(actions).display : "",
+          };
+        `,
+      );
+      if (
+        !clearConfirmState.hasConfirm ||
+        !clearConfirmState.hasCancel ||
+        clearConfirmState.confirmLabel !== "确认清空" ||
+        !clearConfirmState.confirmTitle.includes("本地图片不会删除") ||
+        clearConfirmState.confirmWidth > 78 ||
+        clearConfirmState.confirmHeight > 30 ||
+        clearConfirmState.cancelWidth > 32 ||
+        clearConfirmState.confirmWhiteSpace !== "nowrap" ||
+        clearConfirmState.actionsDisplay !== "flex" ||
+        !/rgb\(255, 255, 255\)/.test(clearConfirmState.confirmColor) ||
+        !/rgb\(220, 38, 38\)|rgb\(185, 28, 28\)/.test(clearConfirmState.confirmBackground)
+      ) {
+        throw new Error(`${viewport.name}: Clear records should ask for compact confirmation, got ${JSON.stringify(clearConfirmState)}`);
+      }
+      await evaluateInDom(
+        page,
+        `
+          const confirm = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-clear-confirm"));
+          if (!confirm) throw new Error("No confirm clear button");
+          confirm.click();
+          return true;
         `,
       );
       await page.waitForFunction(() => {
