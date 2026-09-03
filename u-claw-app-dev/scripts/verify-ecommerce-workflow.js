@@ -489,6 +489,7 @@ function verifyPatchSource(errors) {
     "UcEcommerceRecordEffectiveStatus",
     "UcEcommercePrimaryActionState",
     "UcEcommerceFormSignature",
+    "ecommerceResultBelongsToRequest",
     "ecommerceUsageSyncing",
     "ecommerceLastSubmittedSignature",
     "创建生成任务",
@@ -890,6 +891,12 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (!/UcEcommerceMergeImages\(m,Array\.isArray\(t\?\.images\)\?t\.images:\[\]\)/.test(content)) {
       errors.push(`${label} must merge final ecommerce images with progress-delivered images`);
+    }
+    if (!/m=this\.ecommerceResultBelongsToRequest\(n\.id\)&&Array\.isArray\(this\.ecommerceResult\?\.images\)\?this\.ecommerceResult\.images:\[\]/.test(content)) {
+      errors.push(`${label} must isolate final image merging to the active ecommerce request`);
+    }
+    if (!/r=this\.ecommerceResultBelongsToRequest\(n\.id\)&&Array\.isArray\(this\.ecommerceResult\?\.images\)\?this\.ecommerceResult\.images:\[\]/.test(content)) {
+      errors.push(`${label} must isolate failed ecommerce task recovery to the active request`);
     }
     if (!/UcEcommerceBuildDirectPayload\(n,c\)/.test(content)) {
       errors.push(`${label} must build ecommerce image payload from the submitted file snapshot after clearing the form`);
