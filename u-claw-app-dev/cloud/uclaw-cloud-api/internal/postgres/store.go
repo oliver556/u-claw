@@ -295,6 +295,42 @@ ON CONFLICT (uclaw_user_id) DO UPDATE SET
 	return nil
 }
 
+// FindNewAPIAccount returns the saved New API mapping used to make initial quota idempotent.
+func (s *Store) FindNewAPIAccount(ctx context.Context, uclawUserID int64) (provisioning.Account, bool, error) {
+	var account provisioning.Account
+	var newAPIUserID sql.NullInt64
+	var tokenFingerprint sql.NullString
+	var tokenRotatedAt sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+SELECT uclaw_user_id, newapi_base_url, newapi_user_id, newapi_username, token_fingerprint, token_rotated_at
+FROM newapi_accounts
+WHERE uclaw_user_id = $1
+`, uclawUserID).Scan(
+		&account.UClawUserID,
+		&account.NewAPIBaseURL,
+		&newAPIUserID,
+		&account.NewAPIUsername,
+		&tokenFingerprint,
+		&tokenRotatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return provisioning.Account{}, false, nil
+		}
+		return provisioning.Account{}, false, fmt.Errorf("find newapi account: %w", err)
+	}
+	if newAPIUserID.Valid {
+		account.NewAPIUserID = newAPIUserID.Int64
+	}
+	if tokenFingerprint.Valid {
+		account.TokenFingerprint = tokenFingerprint.String
+	}
+	if tokenRotatedAt.Valid {
+		account.TokenRotatedAt = tokenRotatedAt.Time
+	}
+	return account, true, nil
+}
+
 // SeedActivationCode inserts an unused code hash for printed-card operations.
 func (s *Store) SeedActivationCode(ctx context.Context, code string, batchID sql.NullInt64, newAPIUserGroup string) error {
 	_, err := s.db.ExecContext(ctx, `

@@ -16,6 +16,7 @@ import (
 
 // Store persists the New API account mapping without storing raw API keys.
 type Store interface {
+	FindNewAPIAccount(ctx context.Context, uclawUserID int64) (Account, bool, error)
 	SaveNewAPIAccount(ctx context.Context, account Account) error
 }
 
@@ -78,6 +79,12 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		return activation.ProvisionResult{}, fmt.Errorf("phone is required")
 	}
 
+	// The local account mapping is the idempotency source for one-time initial quota.
+	_, accountExists, err := s.store.FindNewAPIAccount(ctx, req.UserID)
+	if err != nil {
+		return activation.ProvisionResult{}, err
+	}
+
 	password := DeriveUserPassword(req.UserID, phone, s.cfg.PasswordSecret)
 	createErr := s.admin.CreateUser(ctx, newapi.CreateUserRequest{
 		Username:    phone,
@@ -127,7 +134,9 @@ func (s *Service) ProvisionNewAPI(ctx context.Context, req activation.ProvisionR
 		}
 	}
 
-	if s.cfg.InitialQuota > 0 {
+	// Initial activation quota is a one-time grant for this Bavi-box user.
+	// Existing local mapping means a retry/token restore, not another credit.
+	if !accountExists && s.cfg.InitialQuota > 0 {
 		if err := s.admin.AddQuota(ctx, newapi.AddQuotaRequest{UserID: user.ID, Quota: s.cfg.InitialQuota}); err != nil {
 			return activation.ProvisionResult{}, err
 		}

@@ -155,6 +155,11 @@ type spikeProvisionStore struct {
 	account provisioning.Account
 }
 
+// FindNewAPIAccount keeps spike provisioning in first-run mode without a local DB.
+func (s *spikeProvisionStore) FindNewAPIAccount(_ context.Context, _ int64) (provisioning.Account, bool, error) {
+	return provisioning.Account{}, false, nil
+}
+
 // SaveNewAPIAccount captures provisioning output without writing local spike data to production DB.
 func (s *spikeProvisionStore) SaveNewAPIAccount(_ context.Context, account provisioning.Account) error {
 	s.account = account
