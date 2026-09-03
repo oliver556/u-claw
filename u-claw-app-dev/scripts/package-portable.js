@@ -18,8 +18,10 @@ const macLauncherSource = path.join(appDir, 'scripts', 'launcher', 'macos', 'mai
 const macStartScript = path.join(appDir, 'scripts', 'Mac-Start-App.command');
 const macLauncherScriptInclude = path.join(appDir, 'scripts', 'launcher', 'macos', 'generated-start-script.inc');
 const macLauncherBinary = path.join(releaseDir, 'launcher', 'macos', 'Bavi-box');
+const appIconIcns = path.join(appDir, 'assets', 'icon.icns');
 const winLauncherSourceDir = path.join(appDir, 'scripts', 'launcher', 'windows');
 const winLauncherBinary = path.join(releaseDir, 'launcher', 'Bavi-box.exe');
+const winLauncherResource = path.join(winLauncherSourceDir, 'rsrc_windows_amd64.syso');
 const winUpdaterSourceDir = path.join(appDir, 'scripts', 'updater', 'windows-entry');
 const winUpdaterBinary = path.join(releaseDir, 'launcher', 'Bavi-box Win Update.exe');
 const winSyncScript = path.join(appDir, 'scripts', 'Windows-Sync-Data.ps1');
@@ -435,6 +437,7 @@ function packageVersionJson(macArm64Hash, macX64Hash, winHash) {
 function buildMacLauncher(stageRoot) {
   ensureFile(macLauncherSource, 'macOS launcher source');
   ensureFile(macStartScript, 'macOS start script');
+  ensureFile(appIconIcns, 'macOS launcher icon');
   writeText(
     macLauncherScriptInclude,
     [
@@ -466,6 +469,7 @@ function buildMacLauncher(stageRoot) {
   const appBundle = path.join(stageRoot, 'Bavi-box.app');
   const contentsDir = path.join(appBundle, 'Contents');
   const macOsDir = path.join(contentsDir, 'MacOS');
+  const resourcesDir = path.join(contentsDir, 'Resources');
   const executablePath = path.join(macOsDir, 'Bavi-box');
 
   fs.rmSync(appBundle, { recursive: true, force: true });
@@ -480,6 +484,8 @@ function buildMacLauncher(stageRoot) {
   <string>Bavi-box</string>
   <key>CFBundleIdentifier</key>
   <string>org.u-claw.portable.launcher</string>
+  <key>CFBundleIconFile</key>
+  <string>icon.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -498,12 +504,15 @@ function buildMacLauncher(stageRoot) {
 </plist>
 `);
   fs.copyFileSync(macLauncherBinary, executablePath);
+  fs.mkdirSync(resourcesDir, { recursive: true });
+  fs.copyFileSync(appIconIcns, path.join(resourcesDir, 'icon.icns'));
   fs.chmodSync(executablePath, 0o755);
   run('codesign', ['--force', '--deep', '--sign', '-', appBundle]);
 }
 
 function buildWindowsLauncher(stageRoot) {
   ensureFile(path.join(winLauncherSourceDir, 'main.go'), 'Windows launcher source');
+  ensureFile(winLauncherResource, 'Windows launcher icon resource');
   fs.mkdirSync(path.dirname(winLauncherBinary), { recursive: true });
   run('go', ['build', '-trimpath', '-ldflags=-H windowsgui -s -w', '-o', winLauncherBinary, '.'], {
     cwd: winLauncherSourceDir,
