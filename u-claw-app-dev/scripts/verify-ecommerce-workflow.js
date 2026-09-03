@@ -502,6 +502,7 @@ function verifyPatchSource(errors) {
     "UcEcommerceReadPromptPacks",
     "UcEcommerceSavePromptPack",
     "UcEcommerceCurrentPromptPack",
+    "currentEcommercePromptPack",
     "UcEcommercePromptSlots",
     "UcEcommercePromptApprovedSlots",
     "UcEcommercePromptPendingCount",
@@ -521,6 +522,8 @@ function verifyPatchSource(errors) {
     "生成 Prompt Pack",
     "正在生成提示词",
     "确认并生成图片",
+    "开始生成图片",
+    "待开始生成",
     "生成新的 Prompt Pack",
     "至少通过 1 张",
     "Prompt Pack",
@@ -539,6 +542,9 @@ function verifyPatchSource(errors) {
     "uclaw-ecommerce-prompt-detail",
     "uclaw-ecommerce-prompt-editor",
     "uclaw-ecommerce-prompt-actions",
+    "uclaw-ecommerce-prompt-start",
+    "uclaw-ecommerce-result-start",
+    "uclaw-ecommerce-start-box",
     "任务已创建",
     "基于当前资料新建任务",
     "创建新任务",
@@ -593,6 +599,12 @@ function verifyPatchSource(errors) {
     "ecommerce-record-delete-confirm-1",
     "ecommerce-record-density-1",
     "ecommerce-record-tombstone-1",
+    "ecommerce-record-align-1",
+    "ecommerce-record-chip-center-1",
+    "ecommerce-prompt-pack-rehydrate-actions-1",
+    "ecommerce-start-cta-1",
+    "ecommerce-image-task-record-1",
+    "sourcePromptPackId",
     "UcEcommerceLogDiagnosticMarker",
     "UcEcommerceRecordDeleteConfirmMarker",
     "UcEcommerceRecordDensityMarker",
@@ -698,11 +710,25 @@ function verifyPatchSource(errors) {
     "deleteEcommerceRecord",
     "UcEcommerceRememberDeletedRecords",
     "loadEcommercePromptPack",
+    "currentEcommercePromptPack",
     "generateEcommercePromptPack",
     "approveAllEcommercePromptSlots",
   ]) {
     requireToken(errors, "ecommerce-task-page-methods.source.txt", methodsSource, token);
   }
+
+  requireToken(
+    errors,
+    "ecommerce-task-page-methods.source.txt",
+    methodsSource,
+    "当前主程序还未加载 Prompt Pack 接口，请完全退出并重启 Bavi-box 后重试。",
+  );
+  requireToken(
+    errors,
+    "ecommerce-task-page-methods.source.txt",
+    methodsSource,
+    "error:`生成 Prompt Pack 失败：${s}`",
+  );
 
   if (content.includes("readCanonicalEcommerceTaskPageMethods() ||")) {
     errors.push("patch-openclaw.js must not fall back to generated tasks-page assets for ecommerce methods");
@@ -718,6 +744,16 @@ function verifyPatchSource(errors) {
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-design-layout-4");
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-ultrawide-layout-2");
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-swiper-preview-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-count-nowrap-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-small-screen-layout-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-record-align-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-record-chip-center-1");
+  requireToken(errors, "patch-openclaw.js", content, "ecommerce-image-task-record-1");
+  requireToken(errors, "ecommerce-task-page-methods.source.txt", methodsSource, "sourcePromptPackId");
+  requireToken(errors, "ecommerce-task-page-methods.source.txt", methodsSource, "promptPackId:l.promptPackId");
+  if (methodsSource.includes("l.id=String(r.requestId||r.id||l.id)")) {
+    errors.push("ecommerce image generation must create a new image-task record instead of overwriting the Prompt Pack record");
+  }
   if (/body:has\(openclaw-tasks-page \.uclaw-ecommerce-workbench\) \.(topbar|sidebar|sidebar-shell|nav-item)/.test(content)) {
     errors.push("patch-openclaw.js must not scale global shell chrome on ecommerce route");
   }
@@ -790,10 +826,13 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommercePrimaryActionState",
       "ecommerceUsageSyncing",
       "UcEcommerceFormSignature",
+      "currentEcommercePromptPack",
       "ecommerceLastSubmittedSignature",
       "生成 Prompt Pack",
       "正在生成提示词",
       "确认并生成图片",
+      "开始生成图片",
+      "待开始生成",
       "生成新的 Prompt Pack",
       "至少通过 1 张",
       "Prompt Pack",
@@ -803,7 +842,8 @@ function verifyGeneratedTasksPage(errors) {
       "prompts.json",
       "prompts.md",
       "approvedSlots",
-      "l.requestId=l.id,l.promptPack=r",
+      "sourcePromptPackId",
+      "promptPackId:l.promptPackId",
       "uclaw.ecommercePromptPacks.v1",
       "data-uclaw-ecommerce-workbench='prompt-pack'",
       "uclaw-ecommerce-prompt-panel",
@@ -813,6 +853,9 @@ function verifyGeneratedTasksPage(errors) {
       "uclaw-ecommerce-prompt-detail",
       "uclaw-ecommerce-prompt-editor",
       "uclaw-ecommerce-prompt-actions",
+      "uclaw-ecommerce-prompt-start",
+      "uclaw-ecommerce-result-start",
+      "uclaw-ecommerce-start-box",
       "任务已创建",
       "基于当前资料新建任务",
       "创建新任务",
@@ -868,6 +911,11 @@ function verifyGeneratedTasksPage(errors) {
       "ecommerce-record-delete-confirm-1",
       "ecommerce-record-density-1",
       "ecommerce-record-tombstone-1",
+      "ecommerce-record-align-1",
+      "ecommerce-record-chip-center-1",
+      "ecommerce-prompt-pack-rehydrate-actions-1",
+      "ecommerce-start-cta-1",
+      "ecommerce-image-task-record-1",
       "diagnostic_status",
       "missing_fields",
       "当前日志为进行中快照",
@@ -956,6 +1004,9 @@ function verifyGeneratedTasksPage(errors) {
     }
     if (content.includes("this.ecommerceActiveRecord&&this.upsertEcommerceRecord({...this.ecommerceActiveRecord,status:`generating`")) {
       errors.push(`${label} still forces active ecommerce records back to generating`);
+    }
+    if (content.includes("l.id=String(r.requestId||r.id||l.id)")) {
+      errors.push(`${label} must create a separate image-task record after Prompt Pack approval`);
     }
     if (content.includes("UcEcommerceRecordStatusText(t.status)") || content.includes("UcEcommerceStatusChip(t.status)")) {
       errors.push(`${label} must derive ecommerce record status from full record data`);
@@ -1111,6 +1162,13 @@ function verifyGeneratedCss(errors) {
       ".uclaw-ecommerce-drop",
       ".update-banner",
       "ecommerce-design-layout-4",
+      "ecommerce-count-nowrap-1",
+      "ecommerce-small-screen-layout-1",
+      "ecommerce-record-align-1",
+      "ecommerce-record-chip-center-1",
+      "ecommerce-prompt-pack-rehydrate-actions-1",
+      "ecommerce-start-cta-1",
+      "ecommerce-image-task-record-1",
     ]) {
       requireToken(errors, label, content, token);
     }
@@ -1137,6 +1195,13 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-density-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-tombstone-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-prompt-pack-workbench-2");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-count-nowrap-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-small-screen-layout-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-align-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-chip-center-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-prompt-pack-rehydrate-actions-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-start-cta-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-image-task-record-1");
 }
 
 /**

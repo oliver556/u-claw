@@ -2282,7 +2282,7 @@ function patchServiceWorker() {
   let source = read(swPath);
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-4-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-4-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1-ecommerce-count-nowrap-1-ecommerce-small-screen-layout-1-ecommerce-record-align-1-ecommerce-record-chip-center-1-ecommerce-prompt-pack-rehydrate-actions-1-ecommerce-start-cta-1-ecommerce-image-task-record-1";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -2894,6 +2894,11 @@ function patchTasksPageEcommerceWorkflow() {
     "function UcEcommerceRecordDeleteConfirmMarker(){return`ecommerce-record-delete-confirm-1`}",
     "function UcEcommerceRecordDensityMarker(){return`ecommerce-record-density-1`}",
     "function UcEcommerceRecordDeleteTombstoneMarker(){return`ecommerce-record-tombstone-1`}",
+    "function UcEcommerceRecordAlignMarker(){return`ecommerce-record-align-1`}",
+    "function UcEcommerceRecordChipCenterMarker(){return`ecommerce-record-chip-center-1`}",
+    "function UcEcommercePromptPackRehydrateActionsMarker(){return`ecommerce-prompt-pack-rehydrate-actions-1`}",
+    "function UcEcommerceStartCtaMarker(){return`ecommerce-start-cta-1`}",
+    "function UcEcommerceImageTaskRecordMarker(){return`ecommerce-image-task-record-1`}",
     "function UcEcommerceLogExportPayload(e){let t=Array.isArray(e?.images)?e.images.map(e=>({id:e?.id||``,type:e?.type||``,title:e?.title||``,model:e?.model||``,mimeType:e?.mimeType||``,localPath:e?.localPath||``,localFileName:e?.localFileName||``,savedAt:e?.savedAt||``})):[],n=Number(e?.progress?.total||0);!n&&Array.isArray(e?.output_types)&&e?.output_counts&&(n=e.output_types.reduce((t,n)=>t+(Number(e.output_counts[n])||0),0));let r=t.length,a=String(e?.progress?.status||e?.status||``),o=Date.parse(e?.generated_at||e?.createdAt||``),s=Number.isFinite(o)?Date.now()-o:null,c=[];r||c.push(`images`),(e?.model||t.find(e=>e.model))||c.push(`model`),e?.billing||c.push(`billing`),e?.localDir||c.push(`localDir`),e?.localManifestPath||c.push(`localManifestPath`);let l=a===`failed`&&!r?`failed`:a===`interrupted`?`interrupted`:(a===`started`||a===`generating`||a===`processing`)&&(!n||r<n)?`running`:r>0&&n>0&&r<n?`partial`:r>0&&(a===`completed`||a===`settled`||!n||r>=n)?`completed`:a||`unknown`,u=l===`running`?`当前日志为进行中快照，字段为空表示任务尚未产出或尚未收尾，不代表已完成生成 0 张。`:`本文件为生成排障日志，包含 manifest、warnings、billing、usage 与本地文件索引，不含图片二进制。`;return{...e,images:t,diagnostic_status:l,diagnostic:{status:l,raw_status:a,progress_status:String(e?.progress?.status||``),planned_count:Number.isFinite(n)?n:0,generated_count:r,elapsed_ms:s,missing_fields:c},exported_at:new Date().toISOString(),export_note:u}}",
     "function UcEcommerceRecordInitial(e){let t=String(e?.productName||e?.result?.name||`商`).trim();return (Array.from(t)[0]||`商`).toUpperCase()}",
     "function UcEcommerceRecordProgressPercent(e,t){let n=Number(e)||0,r=Number(t)||0;return r>0?Math.max(0,Math.min(100,Math.round(n*100/r))):n>0?100:0}",
@@ -2961,7 +2966,7 @@ function patchTasksPageEcommerceWorkflow() {
     )
     .replace(
       "I=UcEcommerceRecordHasBillingError({result:o}),O=e.ecommerceUsageSyncing===!0;",
-      "I=UcEcommerceRecordHasBillingError({result:o}),O=e.ecommerceUsageSyncing===!0,j=UcEcommerceRecordPageSize(),k=UcEcommerceClampRecordPage(e.ecommerceRecordsPage,l.length),z=Math.max(1,Math.ceil(l.length/j)),G=(k-1)*j,J=l.slice(G,G+j);",
+      "Z=K&&K.taskSignature===W&&UcEcommercePromptPendingCount(K)===0&&UcEcommercePromptApprovedSlots(K).length>0&&!u,I=UcEcommerceRecordHasBillingError({result:o}),O=e.ecommerceUsageSyncing===!0,j=UcEcommerceRecordPageSize(),k=UcEcommerceClampRecordPage(e.ecommerceRecordsPage,l.length),z=Math.max(1,Math.ceil(l.length/j)),G=(k-1)*j,J=l.slice(G,G+j);",
     )
     .replace(
       "><strong>生成记录</strong><span>${l.length?`最近 ${l.length} 条`:`暂无记录`}</span>",
@@ -2977,7 +2982,11 @@ function patchTasksPageEcommerceWorkflow() {
     )
     .replace(
       "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后在此预览、单图下载和打包。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;",
-      "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,L=o?.localDir||s.find(e=>e?.localDir)?.localDir||``,M=o?.localManifestPath||``,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后自动保存到电脑本地，也可在此预览和单图下载。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;",
+      "let q=o?.progress||null,x=A.total?Math.min(100,Math.round((A.done||0)*100/A.total)):0,L=o?.localDir||s.find(e=>e?.localDir)?.localDir||``,M=o?.localManifestPath||``,y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>生成结果</strong><span>生成后自动保存到电脑本地，也可在此预览和单图下载。</span></div></div><div class='uclaw-ecommerce-empty'>上传商品图并点击生成后，结果会直接显示在这里。</div></section>`;if(Z&&!o&&!s.length)y=i`<section class='uclaw-ecommerce-result'><div class='uclaw-ecommerce-result-head'><div><strong>待开始生成</strong><span>${UcEcommercePromptApprovedSlots(K).length}/${H.length} Prompt 已通过，点击后创建图片任务。</span></div></div><div class='uclaw-ecommerce-start-box'><button class='btn primary uclaw-ecommerce-result-start' type='button' @click=${()=>e.startEcommerceImageGeneration?.()}>开始生成图片</button><span>会调用图片接口并消耗额度；生成后会在这里出一张显示一张。</span></div></section>`;",
+    )
+    .replace(
+      "<div class='uclaw-ecommerce-summary'>${K?i`<button class='btn ghost' type='button' @click=${()=>e.approveAllEcommercePromptSlots?.()}>全部通过</button><button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptPack?.()}>重生整组</button>`:``}</div>",
+      "<div class='uclaw-ecommerce-summary'>${Z?i`<button class='btn primary uclaw-ecommerce-prompt-start' type='button' @click=${()=>e.startEcommerceImageGeneration?.()}>开始生成图片</button>`:``}${K?i`<button class='btn ghost' type='button' @click=${()=>e.approveAllEcommercePromptSlots?.()}>全部通过</button><button class='btn ghost' type='button' @click=${()=>e.regenerateEcommercePromptPack?.()}>重生整组</button>`:``}</div>",
     )
     .replace(
       "<div class='uclaw-ecommerce-result-actions'><button class='btn primary' type='button' ?disabled=${E} @click=${()=>e.downloadEcommercePackage?.()}>打包下载</button><button class='btn' type='button' @click=${()=>e.copyEcommerceManifest?.()}>复制 Manifest</button></div>",
@@ -3036,6 +3045,7 @@ function patchTasksPageEcommerceWorkflow() {
     "exportEcommerceLog",
     "copyEcommerceManifest",
     "loadEcommercePromptPack",
+    "currentEcommercePromptPack",
     "generateEcommercePromptPack",
     "selectEcommercePromptSlot",
     "approveEcommercePromptSlot",
@@ -3068,7 +3078,7 @@ function patchTasksPageEcommerceWorkflow() {
     )
     .replace(
       "let l=UcEcommerceBuildManifest(e);l.promptPack=r;",
-      "let l=UcEcommerceBuildManifest(e);l.id=String(r.requestId||r.id||l.id),l.requestId=l.id,l.promptPack=r;",
+      "let l=UcEcommerceBuildManifest(e),h=String(r.requestId||r.id||``);l.requestId=l.id,l.sourcePromptPackId=h,l.promptPackId=r.promptPackId||``,l.promptPack=r;",
     )
     .replace(
       "onEcommerceImageProgress(e){if(!e||e.requestId!==this.ecommerceActiveRequestId)return;let t=this.ecommerceActiveManifest||this.ecommerceResult||{},n=Array.isArray(this.ecommerceResult?.images)?this.ecommerceResult.images:[],r=Array.isArray(this.ecommerceResult?.warnings)?[...this.ecommerceResult.warnings]:[],a=Number.isFinite(e.total)?e.total:this.ecommerceActiveRecord?.requestedOutputCount||n.length;",
@@ -8650,7 +8660,7 @@ openclaw-config-page .card {
   min-height: 38px;
 }
 
-/* ecommerce-design-layout-4 ecommerce-large-screen-layout-2 ecommerce-ultrawide-layout-2 */
+/* ecommerce-design-layout-4 ecommerce-large-screen-layout-2 ecommerce-ultrawide-layout-2 ecommerce-count-nowrap-1 ecommerce-small-screen-layout-1 ecommerce-record-align-1 ecommerce-record-chip-center-1 ecommerce-prompt-pack-rehydrate-actions-1 ecommerce-start-cta-1 ecommerce-image-task-record-1 */
 body:has(openclaw-tasks-page .uclaw-ecommerce-workbench) {
   --bg-content: #f4f7fb;
 }
@@ -8910,11 +8920,35 @@ openclaw-tasks-page .uclaw-ecommerce-prompt-detail pre {
 }
 
 openclaw-tasks-page .uclaw-ecommerce-prompt-editor {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 180px;
+  min-height: 260px;
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
   padding: 12px;
+  border: 1px solid #dbe6f3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2937;
   font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
   resize: vertical;
+}
+
+openclaw-tasks-page textarea.input.uclaw-ecommerce-prompt-editor {
+  min-height: 260px !important;
+  border-color: #dbe6f3 !important;
+  background: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-prompt-editor:focus {
+  border-color: #9fc5ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  outline: none;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-prompt-actions {
@@ -8989,8 +9023,11 @@ openclaw-tasks-page .uclaw-ecommerce-workbench textarea:focus {
 
 openclaw-tasks-page .uclaw-ecommerce-textarea {
   min-height: 78px;
+  overflow-x: hidden;
   padding-top: 10px;
   resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-workbench .row {
@@ -9205,10 +9242,11 @@ openclaw-tasks-page .uclaw-ecommerce-type-check b {
 openclaw-tasks-page .uclaw-ecommerce-count {
   box-sizing: border-box;
   display: flex;
-  min-width: 0;
-  width: auto;
+  flex: 0 0 auto;
+  min-width: max-content;
+  width: max-content;
   height: 26px;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
   align-self: center;
   justify-self: end;
@@ -9218,6 +9256,8 @@ openclaw-tasks-page .uclaw-ecommerce-count {
   border: 0;
   border-radius: 0;
   background: transparent;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count span {
@@ -9226,6 +9266,15 @@ openclaw-tasks-page .uclaw-ecommerce-count span {
   height: 26px;
   text-align: center;
   line-height: 26px;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count > span:first-child {
+  display: none;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-count > em {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-count span,
@@ -9241,9 +9290,11 @@ openclaw-tasks-page .uclaw-ecommerce-count em {
 openclaw-tasks-page .uclaw-ecommerce-stepper {
   box-sizing: border-box;
   display: grid;
+  flex: 0 0 60px;
   overflow: hidden;
-  width: 54px;
-  grid-template-columns: 15px 24px 15px;
+  width: 60px;
+  height: 26px;
+  grid-template-columns: 17px 26px 17px;
   align-items: center;
   border: 1px solid #dfe8f4;
   border-radius: 6px;
@@ -9252,7 +9303,7 @@ openclaw-tasks-page .uclaw-ecommerce-stepper {
 
 openclaw-tasks-page .uclaw-ecommerce-stepper button {
   box-sizing: border-box;
-  width: 15px;
+  width: 17px;
   height: 24px;
   min-height: 0;
   padding: 0;
@@ -9273,9 +9324,10 @@ openclaw-tasks-page .uclaw-ecommerce-stepper button:disabled {
 
 openclaw-tasks-page .uclaw-ecommerce-count input {
   box-sizing: border-box;
-  width: 24px;
+  width: 26px;
   height: 24px;
-  min-height: 24px;
+  min-height: 24px !important;
+  max-height: 24px;
   padding: 0;
   border: 0 !important;
   border-radius: 0;
@@ -9342,6 +9394,32 @@ openclaw-tasks-page .uclaw-ecommerce-empty {
   color: #64748b;
   background: #ffffff;
   text-align: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-prompt-start,
+openclaw-tasks-page .uclaw-ecommerce-result-start {
+  min-height: 32px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-start-box {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 22px 18px;
+  border: 1px dashed #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #476582;
+  text-align: center;
+}
+
+openclaw-tasks-page .uclaw-ecommerce-start-box span {
+  max-width: 360px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-file-grid {
@@ -9967,7 +10045,7 @@ openclaw-tasks-page .uclaw-ecommerce-record {
   min-width: 0;
   column-gap: 10px;
   row-gap: 8px;
-  align-items: center;
+  align-items: start;
   grid-template-columns: 30px minmax(0, 1fr) auto;
   grid-template-areas:
     "mark main status"
@@ -9987,6 +10065,7 @@ openclaw-tasks-page .uclaw-ecommerce-record:last-child {
 openclaw-tasks-page .uclaw-ecommerce-record-mark {
   display: inline-flex;
   grid-area: mark;
+  align-self: start;
   width: 28px;
   height: 28px;
   min-width: 28px;
@@ -10017,8 +10096,11 @@ openclaw-tasks-page .uclaw-ecommerce-record-main small {
 }
 
 openclaw-tasks-page .uclaw-ecommerce-record-status {
+  box-sizing: border-box;
   display: inline-flex;
   grid-area: status;
+  align-self: start;
+  align-items: center;
   width: fit-content;
   min-width: 52px;
   max-width: 74px;
@@ -10030,13 +10112,16 @@ openclaw-tasks-page .uclaw-ecommerce-record-status {
   font-size: 12px !important;
   font-weight: 700;
   line-height: 1;
+  text-align: center;
   white-space: nowrap;
 }
 
 openclaw-tasks-page .uclaw-ecommerce-record-progress {
   display: grid;
   grid-area: progress;
+  align-self: start;
   min-width: 0;
+  height: 24px;
   max-width: 112px;
   grid-template-columns: auto minmax(42px, 1fr);
   gap: 8px;
@@ -10066,6 +10151,7 @@ openclaw-tasks-page .uclaw-ecommerce-record-actions {
   display: flex;
   grid-area: actions;
   flex: 0 0 auto;
+  align-self: start;
   gap: 5px;
   align-items: center;
   justify-content: flex-end;
@@ -10151,7 +10237,25 @@ openclaw-tasks-page .uclaw-ecommerce-record-pagination span {
 
 @media (max-width: 1360px) {
   openclaw-tasks-page .uclaw-ecommerce-layout {
-    grid-template-columns: minmax(260px, 0.92fr) minmax(360px, 1.12fr) minmax(300px, 0.96fr);
+    grid-template-columns: minmax(300px, 0.92fr) minmax(0, 1.08fr);
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-side {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+    align-items: start;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-rules {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  openclaw-tasks-page .uclaw-ecommerce-rules > div {
+    flex: 0 0 132px;
   }
 }
 

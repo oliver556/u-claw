@@ -1090,8 +1090,14 @@ async function verifyCompactRecordRail(page) {
       const actions = record?.querySelector(".uclaw-ecommerce-record-actions");
       const mark = record?.querySelector(".uclaw-ecommerce-record-mark");
       const rowRect = record?.getBoundingClientRect();
+      const mainRect = main?.getBoundingClientRect();
+      const progressRect = progress?.getBoundingClientRect();
+      const statusRect = status?.getBoundingClientRect();
+      const actionsRect = actions?.getBoundingClientRect();
+      const markRect = mark?.getBoundingClientRect();
       const style = record ? getComputedStyle(record) : null;
       const statusStyle = status ? getComputedStyle(status) : null;
+      const progressStyle = progress ? getComputedStyle(progress) : null;
       return {
         rowText: (record?.innerText || record?.textContent || "").replace(/\\s+/g, " ").trim(),
         rowWidth: Math.round(rowRect?.width || 0),
@@ -1106,8 +1112,17 @@ async function verifyCompactRecordRail(page) {
         statusWidth: Math.round(status?.getBoundingClientRect?.().width || 0),
         statusHeight: Math.round(status?.getBoundingClientRect?.().height || 0),
         statusWhiteSpace: statusStyle?.whiteSpace || "",
+        statusAlignItems: statusStyle?.alignItems || "",
+        statusBoxSizing: statusStyle?.boxSizing || "",
+        progressHeight: Math.round(progress?.getBoundingClientRect?.().height || 0),
+        progressAlignItems: progressStyle?.alignItems || "",
         statusText: (status?.innerText || status?.textContent || "").replace(/\\s+/g, " ").trim(),
-        markWidth: Math.round(mark?.getBoundingClientRect?.().width || 0),
+        markWidth: Math.round(markRect?.width || 0),
+        mainTop: Math.round(mainRect?.top || 0),
+        markTop: Math.round(markRect?.top || 0),
+        statusTop: Math.round(statusRect?.top || 0),
+        progressTop: Math.round(progressRect?.top || 0),
+        actionsTop: Math.round(actionsRect?.top || 0),
         gridTemplateAreas: style?.gridTemplateAreas || "",
         gridTemplateColumns: style?.gridTemplateColumns || "",
         actionButtonCount: actions ? actions.querySelectorAll("button").length : 0,
@@ -1128,6 +1143,15 @@ async function verifyCompactRecordRail(page) {
   }
   if (state.statusText !== "部分生成" || state.statusWidth > 78 || state.statusHeight > 26 || state.statusWhiteSpace !== "nowrap") {
     throw new Error(`Compact partial status chip should stay small and readable: ${JSON.stringify(state)}`);
+  }
+  if (state.statusAlignItems !== "center" || state.statusBoxSizing !== "border-box" || state.progressHeight !== 24 || state.progressAlignItems !== "center") {
+    throw new Error(`Compact record status chip text and progress should be vertically centered: ${JSON.stringify(state)}`);
+  }
+  if (Math.abs(state.markTop - state.mainTop) > 6 || Math.abs(state.statusTop - state.mainTop) > 6) {
+    throw new Error(`Compact record top row should align with title text: ${JSON.stringify(state)}`);
+  }
+  if (Math.abs(state.actionsTop - state.progressTop) > 6 || state.progressTop <= state.mainTop) {
+    throw new Error(`Compact record second row should align progress and actions below text: ${JSON.stringify(state)}`);
   }
   await evaluateWithRetry(page, () => {
     localStorage.removeItem("uclaw.ecommerceImageRecords.v1");
@@ -1843,6 +1867,68 @@ async function generateApprovedEcommerceImages(page, expectedSlotCount, options 
     throw new Error(`Prompt Pack gate should not call image API before approval: ${JSON.stringify(gateState)}`);
   }
 
+  const promptViewState = await evaluateInDom(
+    page,
+    `
+      const detail = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-prompt-detail"));
+      const pre = detail?.querySelector("pre");
+      const rect = pre?.getBoundingClientRect();
+      return {
+        hasDetail: Boolean(detail),
+        hasPre: Boolean(pre),
+        width: rect?.width || 0,
+        height: rect?.height || 0,
+        borderColor: pre ? getComputedStyle(pre).borderColor : "",
+        background: pre ? getComputedStyle(pre).backgroundColor : "",
+      };
+    `,
+  );
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-prompt-detail button").filter({ hasText: "编辑" }).click();
+  await waitForUiState(
+    page,
+    "Prompt edit textarea should render",
+    () => Boolean(document.querySelector("openclaw-tasks-page .uclaw-ecommerce-prompt-editor")),
+    undefined,
+    10000,
+  );
+  const promptEditState = await evaluateInDom(
+    page,
+    `
+      const detail = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-prompt-detail"));
+      const editor = detail?.querySelector(".uclaw-ecommerce-prompt-editor");
+      const actions = detail?.querySelector(".uclaw-ecommerce-prompt-actions");
+      const rect = editor?.getBoundingClientRect();
+      const styles = editor ? getComputedStyle(editor) : null;
+      return {
+        hasDetail: Boolean(detail),
+        hasEditor: Boolean(editor),
+        width: rect?.width || 0,
+        height: rect?.height || 0,
+        minHeight: styles?.minHeight || "",
+        maxHeight: styles?.maxHeight || "",
+        borderColor: styles?.borderColor || "",
+        background: styles?.backgroundColor || "",
+        fontFamily: styles?.fontFamily || "",
+        actionsTop: actions?.getBoundingClientRect().top || 0,
+      };
+    `,
+  );
+  if (
+    !promptViewState.hasPre ||
+    !promptEditState.hasEditor ||
+    Math.abs(promptViewState.width - promptEditState.width) > 2 ||
+    promptEditState.height < Math.min(250, promptViewState.height) ||
+    !promptEditState.minHeight.includes("260") ||
+    promptEditState.background !== promptViewState.background ||
+    !promptEditState.fontFamily.includes("Menlo")
+  ) {
+    throw new Error(`Prompt edit view should stay visually aligned with preview: ${JSON.stringify({
+      promptViewState,
+      promptEditState,
+    })}`);
+  }
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-prompt-detail button").filter({ hasText: "取消" }).click();
+
   const regenerateBefore = await evaluateInDom(
     page,
     `
@@ -1875,14 +1961,152 @@ async function generateApprovedEcommerceImages(page, expectedSlotCount, options 
   await page.locator("openclaw-tasks-page .uclaw-ecommerce-prompt-detail button").filter({ hasText: "取消" }).click();
 
   await page.locator("openclaw-tasks-page button").filter({ hasText: "全部通过" }).click();
-  await waitForText(page, "确认并生成图片", 10000);
+  await waitForText(page, "开始生成图片", 10000);
+  await waitForText(page, "待开始生成", 10000);
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
-      (node.innerText || node.textContent || "").includes("确认并生成图片"),
+      (node.innerText || node.textContent || "").includes("开始生成图片"),
     );
     return button instanceof HTMLButtonElement && !button.disabled;
   });
-  await page.locator("openclaw-tasks-page button").filter({ hasText: "确认并生成图片" }).click();
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "开始生成图片" }).first().click();
+  await waitForUiState(
+    page,
+    "Image task should create a new record instead of overwriting Prompt Pack record",
+    ({ expectedImageRequestCount: imageCount }) => {
+      const promptRequests = window.__uclawEcommercePromptPackRequests || [];
+      const imageRequests = window.__uclawEcommerceRequests || [];
+      const latestTaskSignature = promptRequests[promptRequests.length - 1]?.payload?.taskSignature || "";
+      const records = JSON.parse(localStorage.getItem("uclaw.ecommerceImageRecords.v1") || "[]");
+      const promptRecord = records.find(
+        (record) => record?.status === "prompt_ready" && record?.promptPack?.taskSignature === latestTaskSignature,
+      );
+      const imageRecord = records.find(
+        (record) =>
+          record &&
+          record !== promptRecord &&
+          record?.promptPack?.taskSignature === latestTaskSignature &&
+          record?.status !== "prompt_ready",
+      );
+      return imageRequests.length >= imageCount && Boolean(promptRecord) && Boolean(imageRecord) && promptRecord.id !== imageRecord.id;
+    },
+    { expectedImageRequestCount: expectedImageRequestCount + 1 },
+    { timeout: 10000 },
+  );
+}
+
+/**
+ * Verifies Prompt Pack actions still work when the visible pack is restored
+ * from localStorage while the component instance field is empty.
+ */
+async function verifyPromptPackActionsAfterRehydrate(page, imagePath) {
+  await waitForText(page, "生成 Prompt Pack", 10000);
+  await waitForTasksRouteSettled(page);
+  await clearEcommerceWorkbenchStorage(page);
+  await installDirectImageApiStub(page);
+  await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("缓存按钮测试杯");
+  await page.locator("openclaw-tasks-page input[placeholder='如：厨房小电']").fill("厨房小电");
+  await page.locator("openclaw-tasks-page textarea").fill("防漏杯盖\n车载便携");
+  await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
+  await waitForText(page, "1 张已选择", 10000);
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
+      (node.innerText || node.textContent || "").includes("生成 Prompt Pack"),
+    );
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "生成 Prompt Pack" }).click();
+  await waitForUiState(
+    page,
+    "Prompt Pack IPC should fire from visible start button",
+    () => (window.__uclawEcommercePromptPackRequests?.length || 0) >= 1,
+    undefined,
+    10000,
+  );
+  await waitForUiState(
+    page,
+    "Prompt Pack cards should render before rehydrate-action test",
+    () => document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-prompt-card").length >= 4,
+    undefined,
+    10000,
+  );
+
+  await evaluateWithRetry(page, () => {
+    const pageElement = document.querySelector("openclaw-tasks-page");
+    pageElement.ecommercePromptPack = null;
+    pageElement.requestUpdate?.();
+  });
+  await waitForUiState(
+    page,
+    "Prompt Pack cards should stay visible from persisted pack after instance field clears",
+    () => {
+      const cards = document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-prompt-card");
+      const pageElement = document.querySelector("openclaw-tasks-page");
+      return cards.length >= 4 && pageElement?.ecommercePromptPack == null;
+    },
+    undefined,
+    10000,
+  );
+
+  await page.locator("openclaw-tasks-page .uclaw-ecommerce-prompt-detail button").filter({ hasText: /^通过$/ }).click();
+  await waitForUiState(
+    page,
+    "Single Prompt Pack approval should update restored pack",
+    () => {
+      const stored = JSON.parse(localStorage.getItem("uclaw.ecommercePromptPacks.v1") || "[]");
+      const latest = stored[stored.length - 1] || null;
+      return Array.isArray(latest?.slots) && latest.slots.some((slot) => slot?.reviewStatus === "approved");
+    },
+    undefined,
+    10000,
+  );
+
+  await evaluateWithRetry(page, () => {
+    const pageElement = document.querySelector("openclaw-tasks-page");
+    pageElement.ecommercePromptPack = null;
+    pageElement.requestUpdate?.();
+  });
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "全部通过" }).click();
+  await waitForText(page, "开始生成图片", 10000);
+  await waitForText(page, "待开始生成", 10000);
+
+  const state = await evaluateInDom(
+    page,
+    `
+      const stored = JSON.parse(localStorage.getItem("uclaw.ecommercePromptPacks.v1") || "[]");
+      const latest = stored[stored.length - 1] || null;
+      const cards = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-prompt-card"));
+      const primary = allNodes().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("确认并生成图片"));
+      const startButtons = allNodes().filter((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("开始生成图片"));
+      const promptStart = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-prompt-start"));
+      const resultStart = allNodes().find((node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-result-start"));
+      return {
+        slotCount: Array.isArray(latest?.slots) ? latest.slots.length : 0,
+        approvedCount: Array.isArray(latest?.slots) ? latest.slots.filter((slot) => slot?.reviewStatus === "approved").length : 0,
+        approvedCardCount: cards.filter((node) => (node.innerText || node.textContent || "").includes("已通过")).length,
+        startButtonCount: startButtons.length,
+        hasPromptStart: Boolean(promptStart),
+        hasResultStart: Boolean(resultStart),
+        hasPendingStartText: (document.querySelector("openclaw-tasks-page")?.innerText || "").includes("待开始生成"),
+        primaryLabel: (primary?.innerText || primary?.textContent || "").trim(),
+        primaryDisabled: Boolean(primary?.disabled),
+        instanceHasPack: Boolean(document.querySelector("openclaw-tasks-page")?.ecommercePromptPack),
+      };
+    `,
+  );
+  if (
+    state.slotCount < 4 ||
+    state.approvedCount !== state.slotCount ||
+    state.approvedCardCount < state.slotCount ||
+    state.startButtonCount < 2 ||
+    !state.hasPromptStart ||
+    !state.hasResultStart ||
+    !state.hasPendingStartText ||
+    state.primaryLabel !== "确认并生成图片" ||
+    state.primaryDisabled
+  ) {
+    throw new Error(`Prompt Pack buttons should work after persisted-pack rehydrate: ${JSON.stringify(state)}`);
+  }
 }
 
 /**
@@ -2007,6 +2231,8 @@ async function exerciseWorkbench(page, imagePath) {
       const tasksPage = document.querySelector("openclaw-tasks-page");
       const assetRow = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-asset-row"));
       const drop = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-drop"));
+      const rules = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-rules"));
+      const ruleCards = allNodes().filter((node) => node instanceof HTMLElement && node.parentElement?.classList.contains("uclaw-ecommerce-rules"));
       const progress = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-progress"));
       const updateBanners = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("update-banner"));
       const activeTypes = typeCards
@@ -2041,6 +2267,54 @@ async function exerciseWorkbench(page, imagePath) {
         const rect = node.getBoundingClientRect();
         return { width: Math.round(rect.width), height: Math.round(rect.height) };
       });
+      const countControlStates = countControls.map((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        const label = node.firstElementChild instanceof HTMLElement ? node.firstElementChild : null;
+        const stepper = node.querySelector(".uclaw-ecommerce-stepper");
+        const unit = node.querySelector("em");
+        const stepperRect = stepper?.getBoundingClientRect();
+        const buttonRects = [...(stepper?.querySelectorAll("button") || [])].map((button) => {
+          const buttonRect = button.getBoundingClientRect();
+          return { width: Math.round(buttonRect.width), height: Math.round(buttonRect.height) };
+        });
+        const input = stepper?.querySelector("input");
+        const inputRect = input?.getBoundingClientRect();
+        return {
+          text: (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim(),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          flexWrap: style.flexWrap,
+          whiteSpace: style.whiteSpace,
+          labelDisplay: label ? getComputedStyle(label).display : "",
+          labelText: (label?.innerText || label?.textContent || "").trim(),
+          stepper: stepper
+            ? {
+                width: Math.round(stepperRect.width),
+                height: Math.round(stepperRect.height),
+                columns: getComputedStyle(stepper).gridTemplateColumns,
+              }
+            : null,
+          input: input
+            ? {
+                width: Math.round(inputRect.width),
+                height: Math.round(inputRect.height),
+                minHeight: getComputedStyle(input).minHeight,
+              }
+            : null,
+          unit: unit
+            ? {
+                text: (unit.innerText || unit.textContent || "").trim(),
+                whiteSpace: getComputedStyle(unit).whiteSpace,
+              }
+            : null,
+          buttonRects,
+        };
+      });
       const typeRects = typeCards.map((node) => {
         const rect = node.getBoundingClientRect();
         return { width: Math.round(rect.width), height: Math.round(rect.height) };
@@ -2069,8 +2343,36 @@ async function exerciseWorkbench(page, imagePath) {
           gridTemplateColumns: style.gridTemplateColumns,
         };
       });
+      const recordAlignmentStates = recordRows.map((node) => {
+        const style = getComputedStyle(node);
+        const rectTop = (selector) => {
+          const target = node.querySelector(selector);
+          return Math.round(target?.getBoundingClientRect?.().top || 0);
+        };
+        const mainTop = rectTop(".uclaw-ecommerce-record-main");
+        const markTop = rectTop(".uclaw-ecommerce-record-mark");
+        const statusTop = rectTop(".uclaw-ecommerce-record-status");
+        const progressTop = rectTop(".uclaw-ecommerce-record-progress");
+        const actionsTop = rectTop(".uclaw-ecommerce-record-actions");
+        return {
+          text: (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 120),
+          gridTemplateAreas: style.gridTemplateAreas,
+          mainTop,
+          markTop,
+          statusTop,
+          progressTop,
+          actionsTop,
+          markDelta: Math.abs(markTop - mainTop),
+          statusDelta: Math.abs(statusTop - mainTop),
+          progressDelta: Math.abs(progressTop - mainTop),
+          actionsDelta: Math.abs(actionsTop - mainTop),
+          progressActionsDelta: Math.abs(progressTop - actionsTop),
+          isSingleLine: style.gridTemplateAreas.includes("mark main status progress actions"),
+        };
+      });
       const recordProgressRects = recordProgressNodes.map((node) => {
         const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
         const bar = node.querySelector("div");
         const text = (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim();
         return {
@@ -2079,6 +2381,7 @@ async function exerciseWorkbench(page, imagePath) {
           height: Math.round(rect.height),
           barWidth: Math.round(bar?.getBoundingClientRect?.().width || 0),
           ariaLabel: node.getAttribute("aria-label") || "",
+          alignItems: style.alignItems,
         };
       });
       const recordStatusRects = recordStatusNodes.map((node) => {
@@ -2089,6 +2392,18 @@ async function exerciseWorkbench(page, imagePath) {
           width: Math.round(rect.width),
           height: Math.round(rect.height),
           whiteSpace: style.whiteSpace,
+          alignItems: style.alignItems,
+          boxSizing: style.boxSizing,
+        };
+      });
+      const ruleCardStates = ruleCards.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          text: (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim(),
         };
       });
       const resultFolderButtonRect = resultFolderButton ? (() => {
@@ -2133,6 +2448,8 @@ async function exerciseWorkbench(page, imagePath) {
         const style = getComputedStyle(node);
         return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
       });
+      const textareaRect = textarea?.getBoundingClientRect?.();
+      const textareaStyle = textarea ? getComputedStyle(textarea) : null;
       return {
         hasWorkbench: Boolean(workbench),
         platform: workbench?.getAttribute("data-uclaw-ecommerce-platform") || "",
@@ -2148,6 +2465,10 @@ async function exerciseWorkbench(page, imagePath) {
         sideRect: elementRect(side),
         assetRowRect: elementRect(assetRow),
         dropRect: elementRect(drop),
+        rulesRect: elementRect(rules),
+        rulesDisplay: rules ? getComputedStyle(rules).display : "",
+        rulesOverflowX: rules ? getComputedStyle(rules).overflowX : "",
+        ruleCardStates,
         progressRect: elementRect(progress),
         assetRowColumns: assetRow ? getComputedStyle(assetRow).gridTemplateColumns : "",
         layoutColumns: layout ? getComputedStyle(layout).gridTemplateColumns : "",
@@ -2159,6 +2480,17 @@ async function exerciseWorkbench(page, imagePath) {
         categoryValue: inputs.find((node) => node.placeholder === "如：厨房小电")?.value || "",
         audienceValue: inputs.find((node) => node.placeholder === "默认可不填")?.value || "",
         sellingPointsValue: textarea?.value || "",
+        sellingPointsTextarea: textarea
+          ? {
+              width: Math.round(textareaRect.width),
+              height: Math.round(textareaRect.height),
+              clientWidth: textarea.clientWidth,
+              scrollWidth: textarea.scrollWidth,
+              overflowX: textareaStyle?.overflowX || "",
+              whiteSpace: textareaStyle?.whiteSpace || "",
+              wordBreak: textareaStyle?.wordBreak || "",
+            }
+          : null,
         draftAfterTaskCreated: JSON.parse(localStorage.getItem("uclaw.ecommerceWorkbench.draft.v1") || "null"),
         draftFileCountAfterTaskCreated: Array.isArray(window.__uclawEcommerceDraftFiles) ? window.__uclawEcommerceDraftFiles.length : -1,
         generatedCount: generatedCards.length,
@@ -2177,11 +2509,13 @@ async function exerciseWorkbench(page, imagePath) {
         recordCount: recordRows.length,
         recordTexts,
         recordRects,
+        recordAlignmentStates,
         recordProgressRects,
         recordStatusRects,
         recordMarkCount: recordMarkNodes.length,
         typeCardCount: typeCards.length,
         countRects,
+        countControlStates,
         typeRects,
         activeTypes,
         primaryActionLabel: (primaryActionButton?.innerText || primaryActionButton?.textContent || "").trim(),
@@ -2243,6 +2577,7 @@ async function runAcceptance(options) {
     { name: "ultrawide", width: 2560, height: 1410 },
     { name: "design", width: 1440, height: 1024 },
     { name: "desktop", width: 1280, height: 980 },
+    { name: "compactDesktop", width: 1200, height: 800 },
     { name: "mobile", width: 390, height: 844 },
   ];
   const results = [];
@@ -2263,6 +2598,8 @@ async function runAcceptance(options) {
       page.on("pageerror", (error) => errors.push(`${viewport.name}: ${error.message}`));
 
       await ensureConnected(page, gatewayUrl, gatewayWebSocketUrl, token);
+      await clearEcommerceWorkbenchStorage(page);
+      await verifyPromptPackActionsAfterRehydrate(page, imagePath);
       await clearEcommerceWorkbenchStorage(page);
       await verifyPartialRecordStatus(page);
       await installDirectImageApiStub(page);
@@ -2317,6 +2654,38 @@ async function runAcceptance(options) {
           throw new Error(`${viewport.name}: Result rail should grow without oversized controls, got ${JSON.stringify(state.sideRect)}`);
         }
       }
+      if (viewport.name === "compactDesktop") {
+        if (!state.layoutColumns || state.layoutColumns.split(" ").length > 2) {
+          throw new Error(`${viewport.name}: Workbench should collapse to two columns when sidebar leaves a narrow content area, got ${state.layoutColumns}`);
+        }
+        if (state.sideRect?.y <= state.panelRect?.y + 4) {
+          throw new Error(`${viewport.name}: Result rail should move below config/prompt on small desktop, got ${JSON.stringify({
+            side: state.sideRect,
+            panel: state.panelRect,
+          })}`);
+        }
+        if (state.rulesDisplay !== "flex" || state.rulesOverflowX !== "auto") {
+          throw new Error(`${viewport.name}: Rule cards should use horizontal scroll, got ${JSON.stringify({
+            display: state.rulesDisplay,
+            overflowX: state.rulesOverflowX,
+          })}`);
+        }
+        if (
+          !state.ruleCardStates?.length ||
+          state.ruleCardStates.some((item) => item.width < 124 || item.height > 132 || item.scrollWidth > item.clientWidth + 4)
+        ) {
+          throw new Error(`${viewport.name}: Rule cards should not collapse into narrow vertical text, got ${JSON.stringify(state.ruleCardStates)}`);
+        }
+      }
+      if (
+        !state.sellingPointsTextarea ||
+        state.sellingPointsTextarea.scrollWidth > state.sellingPointsTextarea.clientWidth + 4 ||
+        state.sellingPointsTextarea.overflowX !== "hidden" ||
+        state.sellingPointsTextarea.whiteSpace !== "pre-wrap" ||
+        !["break-word", "normal"].includes(state.sellingPointsTextarea.wordBreak)
+      ) {
+        throw new Error(`${viewport.name}: Selling points textarea should not show horizontal overflow, got ${JSON.stringify(state.sellingPointsTextarea)}`);
+      }
       if (state.platform !== "amazon") throw new Error(`${viewport.name}: Platform did not switch to amazon: ${state.platform}`);
       if (state.language !== "en") throw new Error(`${viewport.name}: Amazon should default image language to English, got ${state.language}`);
       if (state.visualStyle !== "auto") throw new Error(`${viewport.name}: Created task should reset visual style to default, got ${state.visualStyle}`);
@@ -2356,6 +2725,30 @@ async function runAcceptance(options) {
       ) {
         throw new Error(`${viewport.name}: Count selector should stay compact, got ${JSON.stringify(state.countRects)}`);
       }
+      if (
+        !state.countControlStates?.length ||
+        state.countControlStates.some(
+          (item) =>
+            item.whiteSpace !== "nowrap" ||
+            item.flexWrap !== "nowrap" ||
+            item.labelDisplay !== "none" ||
+            item.scrollWidth > item.clientWidth + 1 ||
+            item.scrollHeight > item.clientHeight + 1 ||
+            !item.stepper ||
+            item.stepper.width < 58 ||
+            item.stepper.width > 64 ||
+            item.stepper.height > 28 ||
+            !item.input ||
+            item.input.width < 24 ||
+            item.input.height < 23 ||
+            item.input.height > 25 ||
+            item.input.minHeight !== "24px" ||
+            item.unit?.whiteSpace !== "nowrap" ||
+            item.buttonRects?.some((rect) => rect.width < 16 || rect.height < 23),
+        )
+      ) {
+        throw new Error(`${viewport.name}: Count selector internals should not wrap or collapse, got ${JSON.stringify(state.countControlStates)}`);
+      }
       if (viewport.name === "mobile" && state.typeRects?.some((rect) => rect.width > viewport.width - 48)) {
         throw new Error(`${viewport.name}: Type cards should fit mobile viewport, got ${JSON.stringify(state.typeRects)}`);
       }
@@ -2379,12 +2772,44 @@ async function runAcceptance(options) {
         throw new Error(`${viewport.name}: Featured result image should be near design height, got ${JSON.stringify(state.featuredImageRect)}`);
       }
       if (state.qaCount < 4) throw new Error(`${viewport.name}: Expected QA chips, got ${state.qaCount}`);
-      if (state.recordCount < 1) throw new Error(`${viewport.name}: Expected one generation record, got ${state.recordCount}`);
+      if (state.recordCount < 2) {
+        throw new Error(`${viewport.name}: Expected Prompt Pack record plus image task record, got ${state.recordCount}`);
+      }
+      if (!state.recordTexts.some((text) => text.includes("待确认"))) {
+        throw new Error(`${viewport.name}: Prompt Pack record should remain after image generation, got ${JSON.stringify(state.recordTexts)}`);
+      }
       if (!state.recordTexts.some((text) => text.includes("扣费异常"))) {
         throw new Error(`${viewport.name}: Billing failure should be visible in generation record, got ${JSON.stringify(state.recordTexts)}`);
       }
       if (!state.recordTexts.some((text) => text.includes("计划 10 张/屏") && text.includes("已出 10 张"))) {
         throw new Error(`${viewport.name}: Generation record should separate planned and generated counts, got ${JSON.stringify(state.recordTexts)}`);
+      }
+      if (
+        !state.recordAlignmentStates?.length ||
+        state.recordAlignmentStates.some((item) => item.markDelta > 6 || item.statusDelta > 6)
+      ) {
+        throw new Error(`${viewport.name}: Record mark/status should align with title top, got ${JSON.stringify(state.recordAlignmentStates)}`);
+      }
+      if (
+        !state.recordStatusRects?.length ||
+        state.recordStatusRects.some((item) => item.alignItems !== "center" || item.boxSizing !== "border-box")
+      ) {
+        throw new Error(`${viewport.name}: Record status chip text should be vertically centered, got ${JSON.stringify(state.recordStatusRects)}`);
+      }
+      if (
+        !state.recordProgressRects?.length ||
+        state.recordProgressRects.some((item) => item.height !== 24 || item.alignItems !== "center")
+      ) {
+        throw new Error(`${viewport.name}: Record progress should share status-chip row height, got ${JSON.stringify(state.recordProgressRects)}`);
+      }
+      if (
+        state.recordAlignmentStates.some((item) =>
+          item.isSingleLine
+            ? item.progressDelta > 6 || item.actionsDelta > 6
+            : item.progressActionsDelta > 6 || item.progressTop <= item.mainTop,
+        )
+      ) {
+        throw new Error(`${viewport.name}: Record progress/actions vertical alignment drifted, got ${JSON.stringify(state.recordAlignmentStates)}`);
       }
       if (!state.primaryActionDisabled || state.primaryActionLabel !== "生成 Prompt Pack" || !state.text.includes("还需：商品图片")) {
         throw new Error(`${viewport.name}: Created task should reset the form to a disabled fresh-create state, got ${JSON.stringify({
@@ -2625,11 +3050,15 @@ async function runAcceptance(options) {
           const target = rows.find((node) => isVisible(node.querySelector(".uclaw-ecommerce-record-delete")));
           const button = target?.querySelector(".uclaw-ecommerce-record-delete");
           if (!button) throw new Error("No visible delete record button");
+          const host = document.querySelector("openclaw-tasks-page");
+          const storedRecords = JSON.parse(localStorage.getItem("uclaw.ecommerceImageRecords.v1") || "[]");
           button.click();
           const targetTitle = (target.querySelector("strong")?.innerText || target.querySelector("strong")?.textContent || "").trim();
           if (!targetTitle) throw new Error("Delete target record title is empty");
           return {
             rowCount: rows.length,
+            hostRecordCount: Array.isArray(host?.ecommerceRecords) ? host.ecommerceRecords.length : rows.length,
+            storedRecordCount: Array.isArray(storedRecords) ? storedRecords.length : rows.length,
             targetTitle,
             targetText: (target.innerText || target.textContent || "").replace(/\\s+/g, " ").trim(),
           };
@@ -2708,7 +3137,7 @@ async function runAcceptance(options) {
       await waitForUiState(
         page,
         `${viewport.name}: deleted record should leave visible history`,
-        ({ targetTitle, targetText, initialRowCount }) => {
+        ({ targetText, initialRowCount, initialHostRecordCount, initialStoredRecordCount }) => {
           const visit = (root = document, out = []) => {
             for (const child of root.children || []) {
               out.push(child);
@@ -2723,7 +3152,9 @@ async function runAcceptance(options) {
             const style = getComputedStyle(node);
             return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
           });
-          const deletedGone = !visibleRecords.some((node) => (node.innerText || node.textContent || "").includes(targetTitle));
+          const targetGone = !visibleRecords.some(
+            (node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim() === targetText,
+          );
           const confirmGone = !visit().some(
             (node) => node instanceof HTMLButtonElement && node.classList.contains("uclaw-ecommerce-record-delete-confirm"),
           );
@@ -2741,18 +3172,20 @@ async function runAcceptance(options) {
             .map((node) => (node instanceof HTMLElement ? node.innerText || node.textContent || "" : ""))
             .join("\\n");
           return (
-            deletedGone &&
+            targetGone &&
             confirmGone &&
             !allText.includes(targetText) &&
-            visibleRecords.length === initialRowCount - 1 &&
-            hostRecordCount === initialRowCount - 1 &&
-            storedRecordCount === initialRowCount - 1
+            visibleRecords.length <= initialRowCount &&
+            hostRecordCount === initialHostRecordCount - 1 &&
+            storedRecordCount === initialStoredRecordCount - 1
           );
         },
         {
           targetTitle: deleteTargetState.targetTitle,
           targetText: deleteTargetState.targetText,
           initialRowCount: deleteTargetState.rowCount,
+          initialHostRecordCount: deleteTargetState.hostRecordCount,
+          initialStoredRecordCount: deleteTargetState.storedRecordCount,
         },
         5000,
       );
