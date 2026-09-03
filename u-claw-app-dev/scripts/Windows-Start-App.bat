@@ -280,6 +280,10 @@ if not exist "%RUNTIME_PROTOCOL_DIR%" mkdir "%RUNTIME_PROTOCOL_DIR%" >nul 2>&1
 if exist "%HANDOFF_FILE%" del /q "%HANDOFF_FILE%" >nul 2>&1
 if exist "%RUN_STATE_FILE%" del /q "%RUN_STATE_FILE%" >nul 2>&1
 call :write_app_launch_env
+if "%UCLAW_PREPARE_ONLY%"=="1" (
+  echo [Bavi-box] Startup preparation complete; desktop app will be launched by Bavi-box.exe.
+  exit /b 0
+)
 call :start_detached_app
 if errorlevel 1 goto fatal
 call :wait_for_launcher_handoff
@@ -359,7 +363,8 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$cache=[
 exit /b 0
 
 :write_app_launch_env
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$envFile=$env:APP_LAUNCH_ENV_FILE; $lines=@('UCLAW_PORTABLE_DATA_DIR='+$env:UCLAW_PORTABLE_DATA_DIR,'UCLAW_PORTABLE_WORK_DATA_DIR='+$env:UCLAW_PORTABLE_WORK_DATA_DIR,'UCLAW_USB_DATA_DIR='+$env:UCLAW_USB_DATA_DIR,'UCLAW_PORTABLE_ROOT='+$env:UCLAW_PORTABLE_ROOT,'UCLAW_CACHE_ROOT='+$env:UCLAW_CACHE_ROOT,'UCLAW_APP_CACHE_DIR='+$env:UCLAW_APP_CACHE_DIR,'UCLAW_ARCHIVE_CACHE='+$env:UCLAW_ARCHIVE_CACHE,'UCLAW_APP_CACHE_STAMP='+$env:UCLAW_APP_CACHE_STAMP,'UCLAW_ELECTRON_PROFILE_DIR='+$env:UCLAW_ELECTRON_PROFILE_DIR,'OPENCLAW_HOME='+$env:OPENCLAW_HOME,'OPENCLAW_STATE_DIR='+$env:OPENCLAW_STATE_DIR,'OPENCLAW_CONFIG_PATH='+$env:OPENCLAW_CONFIG_PATH,'OPENCLAW_DISABLE_BONJOUR='+$env:OPENCLAW_DISABLE_BONJOUR,'UCLAW_ACTIVATION_ENDPOINT='+$env:UCLAW_ACTIVATION_ENDPOINT,'UCLAW_ACTIVATION_REQUIRE_CLOUD='+$env:UCLAW_ACTIVATION_REQUIRE_CLOUD,'UCLAW_MEDIA_PREVIEW_ROOTS='+$env:UCLAW_MEDIA_PREVIEW_ROOTS,'UCLAW_PORTABLE_HOME='+$env:UCLAW_PORTABLE_HOME,'HOME='+$env:HOME,'USERPROFILE='+$env:USERPROFILE,'APPDATA='+$env:APPDATA,'LOCALAPPDATA='+$env:LOCALAPPDATA,'UCLAW_HOST_LOCALAPPDATA='+$env:UCLAW_HOST_LOCALAPPDATA,'CODEX_HOME='+$env:CODEX_HOME,'UCLAW_LAUNCHER_PID='+$env:UCLAW_LAUNCHER_PID); [IO.File]::WriteAllLines($envFile,$lines,[Text.UTF8Encoding]::new($false)); Write-Host ('[Bavi-box] Launch env written: {0}' -f $envFile)"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$keys=@('APP_BIN','UCLAW_PORTABLE_DATA_DIR','UCLAW_PORTABLE_WORK_DATA_DIR','UCLAW_USB_DATA_DIR','UCLAW_PORTABLE_ROOT','UCLAW_CACHE_ROOT','UCLAW_APP_CACHE_DIR','UCLAW_ARCHIVE_CACHE','UCLAW_APP_CACHE_STAMP','UCLAW_ELECTRON_PROFILE_DIR','OPENCLAW_HOME','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_DISABLE_BONJOUR','UCLAW_ACTIVATION_ENDPOINT','UCLAW_ACTIVATION_REQUIRE_CLOUD','UCLAW_MEDIA_PREVIEW_ROOTS','UCLAW_PORTABLE_HOME','HOME','USERPROFILE','APPDATA','LOCALAPPDATA','UCLAW_HOST_LOCALAPPDATA','UCLAW_HOST_USERPROFILE','CODEX_HOME','UCLAW_LAUNCHER_PID'); $lines=foreach($key in $keys){ $key + '=' + [Environment]::GetEnvironmentVariable($key,'Process') }; [IO.File]::WriteAllText($env:APP_LAUNCH_ENV_FILE,($lines -join [Environment]::NewLine)+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))"
+echo [Bavi-box] Launch env written: %APP_LAUNCH_ENV_FILE%
 exit /b 0
 
 :start_detached_app

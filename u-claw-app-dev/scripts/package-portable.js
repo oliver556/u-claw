@@ -24,6 +24,8 @@ const winLauncherBinary = path.join(releaseDir, 'launcher', 'Bavi-box.exe');
 const winLauncherResource = path.join(winLauncherSourceDir, 'rsrc_windows_amd64.syso');
 const winUpdaterSourceDir = path.join(appDir, 'scripts', 'updater', 'windows-entry');
 const winUpdaterBinary = path.join(releaseDir, 'launcher', 'Bavi-box Win Update.exe');
+const winUpdateHelperSourceDir = path.join(appDir, 'scripts', 'updater', 'windows-apply-helper');
+const winUpdateHelperBinary = path.join(releaseDir, 'launcher', 'Bavi-box Win Update Helper.exe');
 const winSyncScript = path.join(appDir, 'scripts', 'Windows-Sync-Data.ps1');
 const macIndependentUpdateScript = path.join(appDir, 'scripts', 'Bavi-box Mac Update.command');
 const desktopAgentDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'Bavi-box', '.openclaw', 'agents', 'main', 'agent');
@@ -392,8 +394,9 @@ Deploy rule:
   Existing chats, skills, memory, license, logs, and data/.openclaw/openclaw.json stay untouched.
 
 Launcher behavior:
-  Launchers show native progress only while copying, extracting, syncing, or closing.
-  Electron window stays hidden until Gateway ready/App ready, then opens directly to the main UI.
+  Windows launcher shows terminal progress only while copying, extracting, and syncing.
+  Windows launcher starts Electron detached after preparation; terminal closes before Gateway wait.
+  Electron loading window owns Gateway startup progress and then opens the main UI.
   Runtime data uses a per-USB computer cache for speed, then syncs back to <USB>/Bavi-box/data.
   Electron Control UI profile uses local per-USB/per-platform storage and is never synced with data/.
   Runtime sync never overwrites USB data/.openclaw/openclaw.json.
@@ -404,8 +407,10 @@ Launcher behavior:
   Clean same-machine restart reuses current app and data cache, skipping USB-to-runtime sync when markers match.
   Close asks for confirmation first, then shows shutdown progress in app while launcher stays hidden.
   Immediate reopen during shutdown queues one relaunch instead of starting a second app/process.
-  Independent updater downloads, verifies, stages, replaces program layer, and launches Bavi-box.app/Bavi-box.exe after completion.
-	`;
+  Windows independent updater downloads, verifies, stages, then a temporary Go helper replaces program files after the updater exits.
+  Windows updater binary is also stored in app/update-runtime; Bavi-box.exe syncs it to the USB root on launch to avoid self-replacement locks.
+  Mac independent updater downloads, verifies, stages, replaces program layer, and launches Bavi-box.app after completion.
+  `;
 }
 
 function packageVersionJson(macArm64Hash, macX64Hash, winHash) {
@@ -529,6 +534,7 @@ function buildWindowsLauncher(stageRoot) {
 
 function buildWindowsUpdater(stageRoot) {
   ensureFile(path.join(winUpdaterSourceDir, 'main.go'), 'Windows updater source');
+  ensureFile(path.join(winUpdateHelperSourceDir, 'main.go'), 'Windows updater helper source');
   fs.mkdirSync(path.dirname(winUpdaterBinary), { recursive: true });
   run('go', ['build', '-trimpath', '-ldflags=-s -w', '-o', winUpdaterBinary, '.'], {
     cwd: winUpdaterSourceDir,
@@ -541,6 +547,18 @@ function buildWindowsUpdater(stageRoot) {
   });
   ensureFile(winUpdaterBinary, 'Windows updater executable');
   fs.copyFileSync(winUpdaterBinary, path.join(stageRoot, 'Bavi-box Win Update.exe'));
+  fs.copyFileSync(winUpdaterBinary, path.join(stageRoot, 'app', 'update-runtime', 'Bavi-box Win Update.exe'));
+  run('go', ['build', '-trimpath', '-ldflags=-H windowsgui -s -w', '-o', winUpdateHelperBinary, '.'], {
+    cwd: winUpdateHelperSourceDir,
+    env: {
+      GOOS: 'windows',
+      GOARCH: 'amd64',
+      CGO_ENABLED: '0',
+      GO111MODULE: 'off'
+    }
+  });
+  ensureFile(winUpdateHelperBinary, 'Windows update apply helper');
+  fs.copyFileSync(winUpdateHelperBinary, path.join(stageRoot, 'app', 'update-runtime', 'Bavi-box Win Update Helper.exe'));
 }
 
 function copyUpdateRuntime(stageRoot) {

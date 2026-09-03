@@ -100,13 +100,30 @@ function copyProgramLayer(stageRoot, stagingRoot) {
   });
 }
 
+function installReplaceList(platform) {
+  const replace = [
+    'app/',
+    'Bavi-box.exe',
+    'Bavi-box.app',
+    'Bavi-box Mac Update.command',
+    'U-Claw Launcher.exe',
+    'U-Claw Launcher.app',
+    'UCLAW-PACKAGE-NOTES.txt',
+    'bootstrap/'
+  ];
+  if (platform !== 'win32') replace.splice(3, 0, 'Bavi-box Win Update.exe');
+  return replace;
+}
+
 function stageForPlatform(commonStageRoot, platformKey, destination) {
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
+  const excludeRootWindowsUpdater = platformKey.startsWith('win32-');
   copyDirFiltered(commonStageRoot, destination, (source, entry) => {
     const relative = path.relative(commonStageRoot, source).split(path.sep).join('/');
     if (!relative) return true;
     assertSafeRelativePath(relative);
+    if (excludeRootWindowsUpdater && relative === 'Bavi-box Win Update.exe') return false;
     return true;
   });
 }
@@ -205,15 +222,7 @@ function create(options) {
         treeDigest: digest
       },
       install: {
-        replace: [
-          'app/',
-          'Bavi-box.exe',
-          'Bavi-box.app',
-          'U-Claw Launcher.exe',
-          'U-Claw Launcher.app',
-          'UCLAW-PACKAGE-NOTES.txt',
-          'bootstrap/'
-        ],
+        replace: installReplaceList(platform),
         preserve: ['data/'],
         entrypoint: platform === 'win32' ? 'Bavi-box.exe' : 'Bavi-box.app'
       },

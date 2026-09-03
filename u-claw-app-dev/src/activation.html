@@ -542,6 +542,7 @@
       launchReady = result.launchReady === true && result.restartRequired !== true;
       setScreen('finish');
       showToast(result.message || '激活服务尚未接入', result.ok ? '' : 'error');
+      if (launchReady) await launchMain();
     }
 
     /**

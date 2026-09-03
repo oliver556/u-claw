@@ -44,6 +44,8 @@ function createMockStage(stageRoot, edition) {
   writeFile(path.join(stageRoot, 'app', 'scripts', 'hard-update-client.js'), '#!/usr/bin/env node\n');
   writeFile(path.join(stageRoot, 'app', 'scripts', 'lib', 'hard-update-utils.js'), 'module.exports = {}\n');
   writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-win32-x64', 'node.exe'), 'mock win updater node\n');
+  writeFile(path.join(stageRoot, 'app', 'update-runtime', 'Bavi-box Win Update.exe'), 'mock windows updater payload\n');
+  writeFile(path.join(stageRoot, 'app', 'update-runtime', 'Bavi-box Win Update Helper.exe'), 'mock win update helper\n');
   writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-darwin-arm64', 'bin', 'node'), 'mock mac arm64 updater node\n');
   writeFile(path.join(stageRoot, 'app', 'update-runtime', 'node-darwin-x64', 'bin', 'node'), 'mock mac x64 updater node\n');
   writeFile(path.join(stageRoot, 'UCLAW-PACKAGE-NOTES.txt'), `${edition} mock\n`);
@@ -210,6 +212,7 @@ async function verifyHardUpdateFlow(tmp) {
   const usbRoot = path.join(tmp, 'usb', 'Bavi-box');
   writeJson(path.join(usbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
   writeJson(path.join(usbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me' });
+  writeFile(path.join(usbRoot, 'Bavi-box Win Update.exe'), 'old windows updater\n');
   const stamp = path.join(usbRoot, '.mock-cache', 'app', '.u-claw-archive.sha256');
   writeFile(stamp, 'old-stamp\n');
   const before = sha256File(path.join(usbRoot, 'data', '.openclaw', 'openclaw.json'));
@@ -219,6 +222,11 @@ async function verifyHardUpdateFlow(tmp) {
   assert(!fs.existsSync(stamp), 'cache stamp was not invalidated');
   assert(readJson(path.join(usbRoot, 'app', 'version.json')).version === '9.9.9', 'version.json not updated');
   assert(readJson(path.join(usbRoot, 'app', 'update-transaction.json')).state === 'complete', 'transaction not complete');
+  assert(fs.readFileSync(path.join(usbRoot, 'Bavi-box Win Update.exe'), 'utf8') === 'old windows updater\n', 'win32 update replaced root updater');
+  assert(
+    fs.readFileSync(path.join(usbRoot, 'app', 'update-runtime', 'Bavi-box Win Update.exe'), 'utf8') === 'mock windows updater payload\n',
+    'win32 update did not install updater payload'
+  );
 
   const httpRoot = path.join(tmp, 'http-release');
   const server = serveStatic(httpRoot);
@@ -250,7 +258,10 @@ async function verifyHardUpdateFlow(tmp) {
     const httpAfter = sha256File(path.join(httpUsbRoot, 'data', '.openclaw', 'openclaw.json'));
     assert(httpBefore === httpAfter, 'HTTP mock update changed openclaw.json');
     assert(readJson(path.join(httpUsbRoot, 'app', 'version.json')).version === '9.9.9', 'HTTP version.json not updated');
-  assert(readJson(path.join(httpUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'HTTP transaction not complete');
+    assert(readJson(path.join(httpUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'HTTP transaction not complete');
+    const platformManifest = readJson(path.join(httpRoot, 'releases', 'packages', 'v9.9.9', 'win32-x64', 'manifest.json'));
+    assert(platformManifest.install.preserve.includes('data/'), 'manifest does not preserve data/');
+    assert(!platformManifest.install.replace.includes('Bavi-box Win Update.exe'), 'win32 manifest should not self-replace updater');
 
     const startupUsbRoot = path.join(tmp, 'startup-usb', 'Bavi-box');
     writeJson(path.join(startupUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
@@ -286,6 +297,26 @@ async function verifyHardUpdateFlow(tmp) {
     assert(independentBefore === independentAfter, 'independent update changed openclaw.json');
     assert(readJson(path.join(independentUsbRoot, 'app', 'version.json')).version === '9.9.9', 'independent version.json not updated');
     assert(readJson(path.join(independentUsbRoot, 'app', 'update-transaction.json')).state === 'complete', 'independent transaction not complete');
+
+    const deferredUsbRoot = path.join(tmp, 'deferred-independent-usb', 'Bavi-box');
+    writeJson(path.join(deferredUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });
+    writeJson(path.join(deferredUsbRoot, 'data', '.openclaw', 'openclaw.json'), { key: 'preserve-me-deferred' });
+    const deferredBefore = sha256File(path.join(deferredUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    const deferredResult = await require('./hard-update-client').independentUpdate({
+      usb: deferredUsbRoot,
+      productionUrl: `http://127.0.0.1:${port}/releases/production.json`,
+      platform: 'win32-x64',
+      deferApply: true
+    });
+    assert(deferredResult.deferred, 'deferred independent update did not defer apply');
+    assert(readJson(path.join(deferredUsbRoot, 'app', 'update-transaction.json')).state === 'staged', 'deferred transaction should stay staged');
+    await require('./hard-update-client').applyStartupUpdate({
+      usb: deferredUsbRoot,
+      transaction: path.join(deferredUsbRoot, 'app', 'update-transaction.json')
+    });
+    const deferredAfter = sha256File(path.join(deferredUsbRoot, 'data', '.openclaw', 'openclaw.json'));
+    assert(deferredBefore === deferredAfter, 'deferred independent update changed openclaw.json');
+    assert(readJson(path.join(deferredUsbRoot, 'app', 'version.json')).version === '9.9.9', 'deferred independent version.json not updated');
 
     const crossPlatformUsbRoot = path.join(tmp, 'cross-platform-usb', 'Bavi-box');
     writeJson(path.join(crossPlatformUsbRoot, 'app', 'version.json'), { schemaVersion: 1, version: '0.0.1', releaseId: 'v0.0.1' });

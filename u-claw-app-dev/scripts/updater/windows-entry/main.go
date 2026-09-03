@@ -9,15 +9,24 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 var defaultProductionURL = "https://oss-download.yiyong.me/bavi-box/releases/production.json"
+
+const (
+	deferredApplyExitCode  = 20
+	detachedProcess        = 0x00000008
+	createNewProcessGroup  = 0x00000200
+	updateHelperBinaryName = "Bavi-box Win Update Helper.exe"
+)
 
 func main() {
 	root := portableRoot()
 	runtimeArchive := filepath.Join(root, "app", "update-runtime", "node-win32-x64.zip")
 	clientSource := filepath.Join(root, "app", "scripts", "hard-update-client.js")
 	clientLibSource := filepath.Join(root, "app", "scripts", "lib")
+	helperSource := filepath.Join(root, "app", "update-runtime", updateHelperBinaryName)
 	launchAfter := filepath.Join(root, "Bavi-box.exe")
 
 	fmt.Println("[Bavi-box] USB root: " + root)
@@ -32,10 +41,17 @@ func main() {
 	if !isDir(clientLibSource) {
 		fail("Missing updater client lib:\n" + clientLibSource)
 	}
+	if !isFile(helperSource) {
+		fail("Missing updater helper:\n" + helperSource)
+	}
 
 	node, client, err := prepareLocalUpdater(runtimeArchive, clientSource, clientLibSource)
 	if err != nil {
 		fail("Failed to prepare local updater: " + err.Error())
+	}
+	helper, err := prepareApplyHelper(helperSource)
+	if err != nil {
+		fail("Failed to prepare updater helper: " + err.Error())
 	}
 
 	fmt.Println("[Bavi-box] Starting independent update...")
@@ -43,13 +59,20 @@ func main() {
 	if productionURL == "" {
 		productionURL = defaultProductionURL
 	}
-	cmd := exec.Command(node, client, "independent-update", "--usb", root, "--platform", "win32-x64", "--production-url", productionURL, "--launch-after", launchAfter)
+	cmd := exec.Command(node, client, "independent-update", "--usb", root, "--platform", "win32-x64", "--production-url", productionURL, "--launch-after", launchAfter, "--defer-apply")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Dir = root
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
+			if exitError.ExitCode() == deferredApplyExitCode {
+				if err := launchApplyHelper(helper, node, client, root, filepath.Join(root, "app", "update-transaction.json"), launchAfter); err != nil {
+					fail("Failed to launch updater helper: " + err.Error())
+				}
+				fmt.Println("[Bavi-box] Update staged. Bavi-box will close this updater and finish replacement in the background.")
+				return
+			}
 			fmt.Printf("[Bavi-box] Update failed with status %d.\n", exitError.ExitCode())
 			pause()
 			os.Exit(exitError.ExitCode())
@@ -126,6 +149,37 @@ func prepareLocalUpdater(runtimeArchive string, clientSource string, clientLibSo
 		_ = os.RemoveAll(temporary)
 	}
 	return filepath.Join(destination, "node", "node.exe"), filepath.Join(destination, "client", "hard-update-client.js"), nil
+}
+
+func prepareApplyHelper(helperSource string) (string, error) {
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot = os.TempDir()
+	}
+	destination := filepath.Join(cacheRoot, "Bavi-box", "updater-helper", fmt.Sprintf("apply-helper-%d.exe", os.Getpid()))
+	if err := copyFile(helperSource, destination, 0755); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
+
+func launchApplyHelper(helper string, node string, client string, root string, transaction string, launchAfter string) error {
+	cmd := exec.Command(helper,
+		"--usb", root,
+		"--transaction", transaction,
+		"--node", node,
+		"--client", client,
+		"--wait-pid", fmt.Sprintf("%d", os.Getpid()),
+		"--launch-after", launchAfter,
+	)
+	cmd.Dir = root
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: detachedProcess | createNewProcessGroup,
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func extractWindowsRuntime(archive string, destination string) error {

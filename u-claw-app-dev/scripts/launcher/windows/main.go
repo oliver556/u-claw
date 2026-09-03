@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -18,6 +19,9 @@ const (
 	mbIconError               = 0x00000010
 	errorAlreadyExists        = 183
 	activationRestartExitCode = 20
+	detachedProcess           = 0x00000008
+	createNewProcessGroup     = 0x00000200
+	rootWindowsUpdaterName    = "Bavi-box Win Update.exe"
 )
 
 var (
@@ -61,6 +65,8 @@ func main() {
 		showStartupError()
 		os.Exit(1)
 	}
+	syncRootWindowsUpdater(root)
+	syncLauncherLogs()
 
 	mutex, alreadyRunning := acquireSingleInstanceMutex(root)
 	if alreadyRunning {
@@ -100,6 +106,16 @@ func main() {
 			break
 		}
 		appendLauncherLog("Relaunch requested while Bavi-box was closing; starting again.")
+		syncLauncherLogs()
+	}
+
+	if exitCode == 0 {
+		if err := launchPreparedApp(root); err != nil {
+			appendLauncherLog("Failed to launch prepared app: " + err.Error())
+			syncLauncherLogs()
+			showStartupError()
+			os.Exit(1)
+		}
 		syncLauncherLogs()
 	}
 
@@ -147,6 +163,162 @@ func hasFreshRelaunchRequest(root string, maxAge time.Duration) bool {
 	}
 	clearRelaunchRequest(root)
 	return true
+}
+
+func launchEnvPath(root string) string {
+	return filepath.Join(root, "app", ".runtime", "windows-app-launch.env")
+}
+
+func parseLaunchEnv(root string) (map[string]string, error) {
+	bytes, err := os.ReadFile(launchEnvPath(root))
+	if err != nil {
+		return nil, err
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(bytes), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		index := strings.Index(line, "=")
+		if index <= 0 {
+			continue
+		}
+		env[line[:index]] = line[index+1:]
+	}
+	return env, nil
+}
+
+func mergedEnv(extra map[string]string) []string {
+	env := map[string]string{}
+	for _, item := range os.Environ() {
+		index := strings.Index(item, "=")
+		if index <= 0 {
+			continue
+		}
+		env[item[:index]] = item[index+1:]
+	}
+	for key, value := range extra {
+		env[key] = value
+	}
+	result := make([]string, 0, len(env))
+	for key, value := range env {
+		result = append(result, key+"="+value)
+	}
+	return result
+}
+
+func launchPreparedApp(root string) error {
+	env, err := parseLaunchEnv(root)
+	if err != nil {
+		return fmt.Errorf("read launch env: %w", err)
+	}
+	appBin := strings.TrimSpace(env["APP_BIN"])
+	if appBin == "" && strings.TrimSpace(env["UCLAW_APP_CACHE_DIR"]) != "" {
+		appBin = filepath.Join(strings.TrimSpace(env["UCLAW_APP_CACHE_DIR"]), "Bavi-box.exe")
+	}
+	if appBin == "" {
+		return fmt.Errorf("APP_BIN missing in %s", launchEnvPath(root))
+	}
+	if _, err := os.Stat(appBin); err != nil {
+		return fmt.Errorf("app binary unavailable %s: %w", appBin, err)
+	}
+	appendLauncherLog("Launching prepared app detached: " + appBin)
+	cmd := exec.Command(appBin)
+	cmd.Dir = filepath.Dir(appBin)
+	cmd.Env = mergedEnv(env)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: detachedProcess | createNewProcessGroup,
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	appendLauncherLog(fmt.Sprintf("Prepared app process started: %d", cmd.Process.Pid))
+	return cmd.Process.Release()
+}
+
+func syncRootWindowsUpdater(root string) {
+	source := filepath.Join(root, "app", "update-runtime", rootWindowsUpdaterName)
+	destination := filepath.Join(root, rootWindowsUpdaterName)
+	if _, err := os.Stat(source); err != nil {
+		return
+	}
+	same, err := sameFileContents(source, destination)
+	if err == nil && same {
+		return
+	}
+	temporary := fmt.Sprintf("%s.tmp-%d", destination, os.Getpid())
+	if err := copyFile(source, temporary, 0755); err != nil {
+		appendLauncherLog("Root updater sync skipped: copy failed: " + err.Error())
+		return
+	}
+	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(temporary)
+		appendLauncherLog("Root updater sync skipped: destination locked: " + err.Error())
+		return
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		_ = os.Remove(temporary)
+		appendLauncherLog("Root updater sync skipped: rename failed: " + err.Error())
+		return
+	}
+	appendLauncherLog("Root Windows updater synchronized from app/update-runtime.")
+}
+
+func sameFileContents(left string, right string) (bool, error) {
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		return false, err
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		return false, err
+	}
+	if leftInfo.Size() != rightInfo.Size() {
+		return false, nil
+	}
+	leftHash, err := sha256File(left)
+	if err != nil {
+		return false, err
+	}
+	rightHash, err := sha256File(right)
+	if err != nil {
+		return false, err
+	}
+	return leftHash == rightHash, nil
+}
+
+func sha256File(filePath string) ([32]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return [32]byte{}, err
+	}
+	var sum [32]byte
+	copy(sum[:], hash.Sum(nil))
+	return sum, nil
+}
+
+func copyFile(source string, destination string, mode os.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	_, err = io.Copy(output, input)
+	return err
 }
 
 func appendLauncherLog(message string) {
@@ -224,6 +396,7 @@ func runScript(root string, script string, logPath string) int {
 	cmd.Stderr = io.MultiWriter(consoleOut, logFile)
 	cmd.Env = append(os.Environ(),
 		"UCLAW_LAUNCHER_GUI=1",
+		"UCLAW_PREPARE_ONLY=1",
 		fmt.Sprintf("UCLAW_LAUNCHER_PID=%d", os.Getpid()),
 		"UCLAW_PORTABLE_ROOT="+root,
 		"UCLAW_LAUNCHER_LOCAL_LOG="+logPath,

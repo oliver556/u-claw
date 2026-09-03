@@ -99,7 +99,7 @@ function usage() {
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --release <release root> --platform win32-x64
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --update-check-url ${defaultUpdateCheckUrl} --platform win32-x64 --device <device_id> --device-token <token>
   node scripts/hard-update-client.js mock-update --usb <Bavi-box root> --production-url ${stagingProductionUrl} --platform win32-x64
-  node scripts/hard-update-client.js independent-update --usb <Bavi-box root> --platform win32-x64 --launch-after <entrypoint>
+  node scripts/hard-update-client.js independent-update --usb <Bavi-box root> --platform win32-x64 --launch-after <entrypoint> [--defer-apply]
   node scripts/hard-update-client.js startup-update --usb <Bavi-box root> --platform win32-x64 [--production-url <release.json>]
   node scripts/hard-update-client.js apply-startup-update --usb <Bavi-box root> --transaction <app/update-transaction.json> --wait-pid <pid> --launch-after <entrypoint>
   node scripts/hard-update-client.js check --usb <Bavi-box root> --release <release root> --platform darwin-arm64
@@ -140,6 +140,7 @@ function parseArgs(argv) {
     else if (arg === '--launch-after') options.launchAfter = readValue();
     else if (arg === '--stamp-file') options.stampFile = readValue();
     else if (arg === '--platform') options.platform = readValue();
+    else if (arg === '--defer-apply') options.deferApply = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
@@ -1233,6 +1234,17 @@ async function independentUpdate(options) {
     const timeoutMs = Number(options.waitShutdownMs || 120000);
     await waitForShutdownComplete(usbRoot, tx.id, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000);
   }
+  if (options.deferApply) {
+    const result = {
+      updateRequired: true,
+      staged: true,
+      deferred: true,
+      transaction: txPath,
+      version: tx.targetVersion
+    };
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  }
   await applyStartupUpdate({
     ...options,
     usb: usbRoot,
@@ -1249,7 +1261,10 @@ async function main() {
   }
   if (options.command === 'check') console.log(JSON.stringify(await check(options), null, 2));
   else if (options.command === 'mock-update') await mockUpdate(options);
-  else if (options.command === 'independent-update') await independentUpdate(options);
+  else if (options.command === 'independent-update') {
+    const result = await independentUpdate(options);
+    if (result?.deferred) process.exitCode = 20;
+  }
   else if (options.command === 'startup-update') {
     const result = await startupUpdate(options);
     if (result.updateRequired && result.staged) process.exitCode = 20;
