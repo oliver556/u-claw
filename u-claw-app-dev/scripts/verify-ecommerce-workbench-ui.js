@@ -341,16 +341,17 @@ async function installDirectImageApiStub(page) {
             };
             const images = outputTypes.flatMap((type) => {
               const count = Number.parseInt(String(outputCounts[type] || 1), 10);
+              const productSlug = String(payload?.manifest?.name || "商品").replace(/\s+/g, "-");
               return Array.from({ length: Number.isFinite(count) ? count : 1 }, (_value, index) => ({
-                id: `${type}-${index + 1}-fixture`,
+                id: `${productSlug}-${type}-${index + 1}-fixture`,
                 type,
-                title: `${titles[type] || type}${index + 1}${units[type] || "张"}`,
+                title: `${payload?.manifest?.name || "商品"}-${titles[type] || type}${index + 1}${units[type] || "张"}`,
                 model: "gpt-image-2",
                 mimeType: "image/png",
                 dataUrl: png,
-                localPath: `${localDir}/${String(index + 1).padStart(2, "0")}-${type}.png`,
+                localPath: `${localDir}/${productSlug}-${String(index + 1).padStart(2, "0")}-${type}.png`,
                 localDir,
-                localFileName: `${String(index + 1).padStart(2, "0")}-${type}.png`,
+                localFileName: `${productSlug}-${String(index + 1).padStart(2, "0")}-${type}.png`,
                 savedAt: new Date().toISOString(),
               }));
             });
@@ -1535,6 +1536,65 @@ async function verifyGeneratedRecordPersistsViaLocalPath(page, viewportName) {
 }
 
 /**
+ * Verifies two consecutive product generations do not merge their current
+ * preview images. The user-facing history may contain both tasks; the active
+ * result rail must only show the newest product.
+ */
+async function verifySequentialProductResultsStayIsolated(page, imagePath, viewportName) {
+  const secondImagePath = path.join(os.tmpdir(), `uclaw-ecommerce-fixture-second-${process.pid}-${Date.now()}.png`);
+  fs.copyFileSync(imagePath, secondImagePath);
+
+  await installDirectImageApiStub(page);
+  await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("纸巾");
+  await page.locator("openclaw-tasks-page textarea").fill("柔韧亲肤\n大包装");
+  await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
+  await waitForText(page, "1 张已选择", 10000);
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "创建生成任务" }).click();
+  await waitForText(page, "纸巾-主图", 10000);
+  await page.waitForFunction(() => document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated").length >= 8);
+
+  await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("杯子");
+  await page.locator("openclaw-tasks-page textarea").fill("防滑杯身\n通勤随行");
+  await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(secondImagePath);
+  await waitForText(page, "1 张已选择", 10000);
+  await page.locator("openclaw-tasks-page button").filter({ hasText: "创建生成任务" }).click();
+  await waitForText(page, "杯子-主图", 10000);
+  await page.waitForFunction(() => document.querySelectorAll("openclaw-tasks-page .uclaw-ecommerce-generated").length >= 8);
+
+  const state = await evaluateInDom(
+    page,
+    `
+      const workbench = allNodes().find((node) => node instanceof HTMLElement && node.getAttribute("data-uclaw-ecommerce-workbench") === "direct-output");
+      const result = allNodes().find((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-result"));
+      const generated = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-generated"));
+      const titles = generated.map((node) => (node.querySelector("strong")?.innerText || node.querySelector("strong")?.textContent || "").trim());
+      const featuredTitle = allNodes().find((node) => node instanceof HTMLElement && node.matches(".uclaw-ecommerce-featured strong"));
+      const records = allNodes().filter((node) => node instanceof HTMLElement && node.classList.contains("uclaw-ecommerce-record"));
+      const stored = JSON.parse(localStorage.getItem("uclaw.ecommerceImageRecords.v1") || "[]");
+      return {
+        resultText: (result?.innerText || result?.textContent || "").replace(/\\s+/g, " ").trim(),
+        workbenchText: (workbench?.innerText || workbench?.textContent || "").replace(/\\s+/g, " ").trim(),
+        generatedCount: generated.length,
+        titles,
+        featuredTitle: (featuredTitle?.innerText || featuredTitle?.textContent || "").trim(),
+        recordTexts: records.map((node) => (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim()),
+        storedNames: stored.map((item) => item?.productName || item?.result?.name || ""),
+      };
+    `,
+  );
+
+  if (!state.resultText.includes("杯子-主图") || state.resultText.includes("纸巾")) {
+    throw new Error(`${viewportName}: Active result rail mixed old and new products: ${JSON.stringify(state)}`);
+  }
+  if (state.generatedCount < 8 || state.titles.some((title) => title.includes("纸巾")) || !state.titles.every((title) => title.includes("杯子"))) {
+    throw new Error(`${viewportName}: Generated thumbnails should only belong to latest product: ${JSON.stringify(state)}`);
+  }
+  if (!state.recordTexts.some((text) => text.includes("纸巾")) || !state.recordTexts.some((text) => text.includes("杯子"))) {
+    throw new Error(`${viewportName}: History should keep both product tasks without merging active results: ${JSON.stringify(state)}`);
+  }
+}
+
+/**
  * Writes a small local PNG fixture for upload interaction.
  */
 function writeImageFixture() {
@@ -2120,30 +2180,7 @@ async function runAcceptance(options) {
       if (state.request?.payload?.outputCounts?.model_image !== 1) {
         throw new Error(`${viewport.name}: Expected model_image count 1`);
       }
-      await page.locator("openclaw-tasks-page input[placeholder='如：便携榨汁杯']").fill("二次创建杯");
-      await page.locator("openclaw-tasks-page textarea").fill("重新填写卖点");
-      await page.locator("openclaw-tasks-page input[type='file']").setInputFiles(imagePath);
-      await waitForText(page, "1 张已选择", 10000);
-      await page.waitForFunction(() => {
-        const button = [...document.querySelectorAll("openclaw-tasks-page button")].find((node) =>
-          (node.innerText || node.textContent || "").includes("创建生成任务"),
-        );
-        return button instanceof HTMLButtonElement && !button.disabled;
-      });
-      await page.locator("openclaw-tasks-page button").filter({ hasText: "创建生成任务" }).click();
-      await page.waitForFunction(() => {
-        const visit = (root = document, out = []) => {
-          for (const child of root.children || []) {
-            out.push(child);
-            if (child.shadowRoot) visit(child.shadowRoot, out);
-            visit(child, out);
-          }
-          return out;
-        };
-        const button = visit().find((node) => node instanceof HTMLButtonElement && (node.innerText || node.textContent || "").includes("任务已创建"));
-        return (window.__uclawEcommerceRequests?.length || 0) >= 2 && button instanceof HTMLButtonElement && button.disabled;
-      });
-      await waitForText(page, "创建生成任务", 10000);
+      await verifySequentialProductResultsStayIsolated(page, imagePath, viewport.name);
       if (!state.text.includes("最长边建议 1600px")) throw new Error(`${viewport.name}: Amazon preset text missing`);
       if (!state.text.includes("模特图")) throw new Error(`${viewport.name}: Model image text missing`);
       if (!state.text.includes("图片语言")) throw new Error(`${viewport.name}: Image language selector text missing`);
@@ -2165,8 +2202,14 @@ async function runAcceptance(options) {
 
       const downloadEvents = [];
       page.on("download", (download) => downloadEvents.push(download.suggestedFilename()));
+      await page
+        .locator("openclaw-tasks-page .uclaw-ecommerce-record")
+        .filter({ hasText: "便携榨汁杯" })
+        .locator("button[aria-label='查看结果']")
+        .first()
+        .click();
       await page.locator("openclaw-tasks-page .uclaw-ecommerce-generated").nth(1).click();
-      await waitForText(page, "主图2张", 5000);
+      await waitForText(page, "便携榨汁杯-主图2张", 5000);
       const previewState = await evaluateInDom(
         page,
         `
@@ -2181,7 +2224,7 @@ async function runAcceptance(options) {
         `,
       );
       await page.waitForTimeout(500);
-      if (previewState.selectedIndex !== 1 || previewState.featuredTitle !== "主图2张") {
+      if (previewState.selectedIndex !== 1 || previewState.featuredTitle !== "便携榨汁杯-主图2张") {
         throw new Error(`${viewport.name}: Thumbnail click should select featured preview, got ${JSON.stringify(previewState)}`);
       }
       const imageDownloads = downloadEvents.filter((name) => /\.(png|jpg|jpeg|webp|svg)$/i.test(name));
@@ -2203,11 +2246,11 @@ async function runAcceptance(options) {
           };
         `,
       );
-      if (!swiperState.open || swiperState.title !== "主图2张" || swiperState.selectedIndex !== 1) {
+      if (!swiperState.open || swiperState.title !== "便携榨汁杯-主图2张" || swiperState.selectedIndex !== 1) {
         throw new Error(`${viewport.name}: Featured click should open swiper preview at selected image, got ${JSON.stringify(swiperState)}`);
       }
       await page.locator("openclaw-tasks-page .uclaw-ecommerce-swiper-nav.is-next").click();
-      await waitForText(page, "主图3张", 5000);
+      await waitForText(page, "便携榨汁杯-主图3张", 5000);
       swiperState = await evaluateInDom(
         page,
         `
@@ -2219,7 +2262,7 @@ async function runAcceptance(options) {
           };
         `,
       );
-      if (swiperState.title !== "主图3张" || swiperState.selectedIndex !== 2) {
+      if (swiperState.title !== "便携榨汁杯-主图3张" || swiperState.selectedIndex !== 2) {
         throw new Error(`${viewport.name}: Swiper next should move to next image, got ${JSON.stringify(swiperState)}`);
       }
       await page.keyboard.press("Escape");
