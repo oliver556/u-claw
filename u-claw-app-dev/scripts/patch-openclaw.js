@@ -7353,8 +7353,24 @@ openclaw-skills-page .skillhub-scene-icon svg {
 }
 
 .sidebar-status__dot {
-  width: 9px;
-  height: 9px;
+  display: none !important;
+}
+
+.sidebar-footer-version {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  max-width: 100%;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-subtle) 74%, white 26%);
+  color: var(--uclaw-navy);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(16, 22, 43, 0.04);
 }
 
 .sidebar--collapsed .sidebar-shell {
