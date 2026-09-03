@@ -825,6 +825,54 @@ function resolveEcommerceImageTargets(outputTypes, outputCounts) {
 }
 
 /**
+ * Normalizes renderer-approved Prompt Pack slots into trusted image targets.
+ * Confirmed slots may carry user-edited prompts, but they still must map to a
+ * supported ecommerce output type and stay within the batch hard cap.
+ */
+function resolveEcommerceApprovedTargets(approvedSlots, outputTypes, outputCounts) {
+  const slots = Array.isArray(approvedSlots) ? approvedSlots : [];
+  if (!slots.length) {
+    throw new Error('请先生成并确认 Prompt Pack，再生成图片。');
+  }
+
+  const targetByType = new Map(ECOMMERCE_IMAGE_DIRECT_TARGETS.map(target => [target.type, target]));
+  const counters = new Map();
+  const normalized = slots
+    .filter(slot => slot && typeof slot === 'object')
+    .map((slot) => {
+      const type = String(slot.type || '').trim();
+      const base = targetByType.get(type);
+      const prompt = String(slot.prompt || '').trim();
+      const reviewStatus = String(slot.reviewStatus || '').trim();
+      if (!base || !prompt || reviewStatus !== 'approved') return null;
+      const count = (counters.get(type) || 0) + 1;
+      counters.set(type, count);
+      return {
+        ...base,
+        id: String(slot.id || `${type}-${count}`).trim(),
+        title: String(slot.title || `${base.title}${count}`).trim(),
+        slotIndex: Number.parseInt(String(slot.slotIndex || count), 10) || count,
+        slotCount: Number.parseInt(String(slot.slotCount || count), 10) || count,
+        template: String(slot.template || base.template).trim(),
+        size: String(slot.size || base.size).trim(),
+        prompt,
+        negativePrompt: String(slot.negativePrompt || '').trim(),
+        reviewStatus,
+      };
+    })
+    .filter(Boolean);
+
+  if (!normalized.length) {
+    throw new Error('请至少确认 1 张 Prompt 后再生成图片。');
+  }
+  if (normalized.length > ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS) {
+    throw new Error(`单次最多生成 ${ECOMMERCE_IMAGE_DIRECT_MAX_OUTPUTS} 张/屏，请降低生成数量。`);
+  }
+
+  return normalized;
+}
+
+/**
  * Resolves the final OpenAI-compatible image size for one ecommerce slot. The
  * UI default remains platform/type driven; explicit ratio presets override it.
  */
@@ -840,6 +888,9 @@ function resolveEcommerceTargetSize(manifest, target) {
  * passed in so users do not need to copy dimensions or compliance notes by hand.
  */
 function buildEcommerceImagePrompt(manifest, target) {
+  const approvedPrompt = typeof target?.prompt === 'string' ? target.prompt.trim() : '';
+  if (approvedPrompt) return approvedPrompt;
+
   const input = manifest?.input || {};
   const outputs = Array.isArray(manifest?.outputs) ? manifest.outputs : [];
   const output = outputs.find(item => item?.type === target.type) || {};
@@ -869,6 +920,128 @@ function buildEcommerceImagePrompt(manifest, target) {
     `合规检查：${Array.isArray(manifest?.qa) ? manifest.qa.join('；') : '文字和事实需人工复核'}`,
     `视觉要求：真实商品外观优先，背景干净，构图有层次，图片内文字使用 ${outputLanguage}，少而清晰，禁止编造品牌授权、销量、资质、功效承诺。`,
   ].join('\n');
+}
+
+/**
+ * Picks a stable strategy driver for the local Prompt Pack. This is intentionally
+ * deterministic in v1 so prompt preview costs no image quota and needs no
+ * provider credential.
+ */
+function resolveEcommercePromptPackDriver(manifest) {
+  const points = Array.isArray(manifest?.input?.selling_points) ? manifest.input.selling_points : [];
+  const text = [
+    manifest?.name,
+    manifest?.input?.category,
+    points.join(' '),
+    manifest?.visual_style?.label,
+  ].join(' ').toLowerCase();
+  if (/痛|问题|解决|修复|耐用|省|替换|墨盒|耗材|效率/.test(text)) return 'pain';
+  if (/礼|美|氛围|情绪|家居|穿搭|质感|高级/.test(text)) return 'emotional';
+  if (/参数|规格|认证|容量|材质|尺寸|兼容/.test(text)) return 'rational';
+  return 'visual';
+}
+
+/**
+ * Creates one Prompt Pack slot for user confirmation before image generation.
+ */
+function buildEcommercePromptPackSlot(manifest, target) {
+  const input = manifest?.input || {};
+  const sellingPoints = Array.isArray(input.selling_points) && input.selling_points.length
+    ? input.selling_points
+    : ['保留参考图中的真实商品外观'];
+  const output = (Array.isArray(manifest?.outputs) ? manifest.outputs : []).find(item => item?.type === target.type) || {};
+  const language = String(manifest?.language?.prompt || manifest?.language?.label || '简体中文').trim();
+  const stylePrompt = String(manifest?.visual_style?.prompt || '全套图保持统一 Campaign Style Lock。').trim();
+  const ratioPrompt = String(manifest?.aspect_ratio?.prompt || '按平台规则选择构图比例。').trim();
+  const purpose = target.type === 'main_image'
+    ? ['click', 'trust', 'recognition'][Math.min((target.slotIndex || 1) - 1, 2)] || 'click'
+    : target.type === 'detail_image'
+      ? ['hook', 'benefit', 'proof', 'spec', 'scenario', 'cta'][((target.slotIndex || 1) - 1) % 6]
+      : 'try-on';
+  const title = target.type === 'main_image'
+    ? `主图${target.slotIndex}：${target.slotIndex === 1 ? '白底清晰截流' : target.slotIndex === 2 ? '场景角度补充' : '细节信任强化'}`
+    : target.type === 'detail_image'
+      ? `详情${target.slotIndex}：${['痛点钩子', '核心卖点', '结构/规格', '使用场景', '信任证据', '下单理由'][((target.slotIndex || 1) - 1) % 6]}`
+      : `模特${target.slotIndex}：真实展示`;
+  const prompt = [
+    '你是 Bavi-box 电商图片生成器。请直接生成成品图，不输出方案文字。',
+    target.instruction,
+    `画面任务：${title}；用途：${purpose}；模板：${target.template}`,
+    `平台：${manifest?.platform_label || manifest?.platform || '未指定平台'}；尺寸/规则：${output.size_rule || target.size}`,
+    `商品：${manifest?.name || '未命名商品'}；类目：${input.category || '待补充'}；目标人群：${input.audience || '默认电商购物人群'}`,
+    `核心卖点：${sellingPoints.join('；')}`,
+    `图片内文字语言：${language}；文案只保留 1-3 个短句，必须可读，不编造销量、价格、认证、功效或品牌背书。`,
+    `风格锁定：${stylePrompt}`,
+    `比例构图：${ratioPrompt}；目标尺寸：${resolveEcommerceTargetSize(manifest, target)}`,
+    '参考图为唯一外观依据：商品形状、颜色、材质、包装、Logo 与 SKU 必须贴近参考图；证据不足时宁可留白。',
+  ].join('\n');
+
+  return {
+    id: `${target.type === 'main_image' ? 'KV' : target.type === 'detail_image' ? 'D' : 'MODEL'}${target.slotIndex || 1}`,
+    type: target.type,
+    title,
+    purpose,
+    template: target.template,
+    size: resolveEcommerceTargetSize(manifest, target),
+    slotIndex: target.slotIndex || 1,
+    slotCount: target.slotCount || 1,
+    copy: sellingPoints.slice(0, 3),
+    prompt,
+    negativePrompt: '低清晰度、错误商品、变形包装、虚构认证、虚构价格、夸张医疗/功效承诺、不可读小字、水印、平台禁用元素',
+    reviewStatus: 'pending',
+    qa: ['product_accuracy', 'platform_size', 'text_readability'],
+    version: Number.parseInt(String(manifest?.prompt_pack_version || manifest?.promptPackVersion || 1), 10) || 1,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Public IPC handler for local Prompt Pack generation. It does not call image
+ * APIs, create chat sessions, or consume NewAPI quota.
+ */
+function generateEcommercePromptPack(payload = {}) {
+  const manifest = payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : null;
+  if (!manifest) throw new Error('缺少 Prompt Pack manifest。');
+  const targets = resolveEcommerceImageTargets(
+    payload.outputTypes || manifest.output_types,
+    payload.outputCounts || manifest.output_counts,
+  );
+  const requestId = String(payload.requestId || manifest.id || crypto.randomUUID()).trim();
+  const version = Number.parseInt(String(payload.version || 1), 10) || 1;
+  const promptManifest = {
+    ...manifest,
+    id: requestId,
+    prompt_pack_version: version,
+    promptPackVersion: version,
+  };
+  const slots = targets.map(target => buildEcommercePromptPackSlot(promptManifest, target));
+
+  return {
+    ok: true,
+    requestId,
+    promptPackId: `prompt-pack-${requestId}`,
+    version,
+    status: 'prompt_ready',
+    taskSignature: String(payload.taskSignature || '').trim(),
+    strategy: {
+      conversionDriver: resolveEcommercePromptPackDriver(manifest),
+      campaignStyleLock: {
+        palette: ['#FFFFFF', '#2457E6', '#171A1F'],
+        lighting: 'clean ecommerce studio lighting with soft shadow',
+        layout: manifest?.visual_style?.label || '平台自动',
+        forbiddenDrift: ['商品外观漂移', 'SKU 颜色变化', '虚构认证/销量/价格'],
+      },
+      complianceRisk: manifest?.needs_backend_confirmation ? 'medium' : 'low',
+      assumptions: [
+        '参考图用于锁定商品外观，Prompt 阶段不做额外视觉识别。',
+        '平台规则来自内置 preset，低置信平台需要人工复核后台限制。',
+      ],
+      missingEvidence: manifest?.needs_backend_confirmation ? ['平台后台规则需二次确认'] : [],
+      humanReviewRequired: Boolean(manifest?.needs_backend_confirmation),
+    },
+    slots,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 /**
@@ -1077,7 +1250,7 @@ async function saveEcommerceImageToLocalLibrary({ image, manifest, requestId, in
  * Writes a manifest next to generated images so local folders remain useful even
  * if the app record or remote provider state disappears later.
  */
-function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, billing, usage, outputDir }) {
+function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, billing, usage, outputDir, promptPack }) {
   if (!outputDir) return null;
   const manifestPath = path.join(outputDir, 'manifest.json');
   safeWriteJson(manifestPath, {
@@ -1093,6 +1266,7 @@ function saveEcommerceLocalManifest({ manifest, requestId, images, warnings, bil
       localFileName: image.localFileName,
       savedAt: image.savedAt,
     })),
+    promptPack: promptPack || manifest?.promptPack || null,
     warnings,
     billing,
     usage,
@@ -1644,7 +1818,13 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
   if (!manifest) throw new Error('缺少生成 manifest。');
   let credential = resolveEcommerceImageCredential();
   const images = normalizeEcommerceInputImages(payload.images);
-  const targets = resolveEcommerceImageTargets(
+  const promptPack = payload.promptPack && typeof payload.promptPack === 'object'
+    ? payload.promptPack
+    : manifest.promptPack && typeof manifest.promptPack === 'object'
+      ? manifest.promptPack
+      : null;
+  const targets = resolveEcommerceApprovedTargets(
+    payload.approvedSlots,
     payload.outputTypes || manifest.output_types,
     payload.outputCounts || manifest.output_counts,
   );
@@ -1754,6 +1934,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     billing,
     usage,
     outputDir: localDir,
+    promptPack,
   });
   emitEcommerceImageProgress(sender, {
     requestId,
@@ -1778,6 +1959,7 @@ async function generateEcommerceImagesDirect(payload = {}, sender = null) {
     usage,
     localDir,
     localManifestPath,
+    promptPack,
   };
 }
 
@@ -4150,6 +4332,7 @@ function setupIPC() {
   ipcMain.handle('uclaw:get-recharge-orders', () => getCloudRechargeOrders());
   ipcMain.handle('uclaw:get-recharge-order', (_event, orderNo) => getCloudRechargeOrder(orderNo));
   ipcMain.handle('uclaw:recharge-model-quota', (_event, payload) => rechargeCloudModelQuota(payload));
+  ipcMain.handle('uclaw:ecommerce-generate-prompt-pack', (_event, payload) => generateEcommercePromptPack(payload));
   ipcMain.handle('uclaw:ecommerce-generate-images', (event, payload) => generateEcommerceImagesDirect(payload, event.sender));
   ipcMain.handle('uclaw:ecommerce-sync-image-usage', (_event, payload) => syncEcommerceImageUsage(payload));
   ipcMain.handle('uclaw:ecommerce-list-local-manifests', () => listEcommerceLocalManifests());
