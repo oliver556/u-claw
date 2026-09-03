@@ -7,6 +7,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui", "assets");
 const patchScript = path.join(root, "scripts", "patch-openclaw.js");
+const ecommerceTaskPageMethodsSource = path.join(root, "scripts", "ecommerce-task-page-methods.source.txt");
 const mainProcessFile = path.join(root, "src", "main.js");
 const preloadFile = path.join(root, "src", "preload.js");
 const cloudMigrationDir = path.join(root, "cloud", "uclaw-cloud-api", "migrations");
@@ -452,6 +453,7 @@ function verifyCloudEcommerceUsageMigration(errors) {
  */
 function verifyPatchSource(errors) {
   const content = readFile(patchScript);
+  const methodsSource = readFile(ecommerceTaskPageMethodsSource);
   const requiredTokens = [
     "patchTasksPageEcommerceWorkflow",
     "data-uclaw-ecommerce-workbench",
@@ -500,7 +502,14 @@ function verifyPatchSource(errors) {
     "UcEcommerceMergeImages",
     "UcEcommerceMergeWarnings",
     "openEcommerceLocalPath",
+    "requestEcommerceRecordDelete",
+    "cancelEcommerceRecordDelete",
+    "requestEcommerceRecordsClear",
+    "cancelEcommerceRecordsClear",
     "deleteEcommerceRecord",
+    "确认删除",
+    "确认清空",
+    "本地图片不会删除",
     "retryEcommerceUsageSync",
     "重试同步用量",
     "uclaw-ecommerce-record-delete",
@@ -528,9 +537,29 @@ function verifyPatchSource(errors) {
     "uclaw-ecommerce-record-view",
     "uclaw-ecommerce-record-sync",
     "uclaw-ecommerce-record-folder",
+    "uclaw-ecommerce-record-delete-confirm",
+    "uclaw-ecommerce-record-delete-cancel",
+    "uclaw-ecommerce-record-clear-confirm",
+    "uclaw-ecommerce-record-clear-cancel",
     "ecommerce-record-pagination-1",
     "ecommerce-log-diagnostic-1",
+    "ecommerce-record-delete-confirm-1",
+    "ecommerce-record-density-1",
+    "ecommerce-record-tombstone-1",
     "UcEcommerceLogDiagnosticMarker",
+    "UcEcommerceRecordDeleteConfirmMarker",
+    "UcEcommerceRecordDensityMarker",
+    "UcEcommerceRecordDeleteTombstoneMarker",
+    "UcEcommerceDeletedRecordsKey",
+    "UcEcommerceRecordDeleteKeys",
+    "UcEcommerceReadDeletedRecordKeys",
+    "UcEcommerceWriteDeletedRecordKeys",
+    "UcEcommerceRememberDeletedRecords",
+    "UcEcommerceRecordIsDeleted",
+    "uclaw.ecommerceImageRecordDeletes.v1",
+    "ecommerceTaskPageMethodsSourcePath",
+    "readCanonicalEcommerceTaskPageMethods",
+    "Missing canonical ecommerce task page method source",
     "diagnostic_status",
     "missing_fields",
     "当前日志为进行中快照",
@@ -604,6 +633,21 @@ function verifyPatchSource(errors) {
 
   for (const token of requiredTokens) {
     requireToken(errors, "patch-openclaw.js", content, token);
+  }
+
+  for (const token of [
+    "cleanupEcommerceFileUrls",
+    "importEcommerceLocalManifests",
+    "startEcommerceImageGeneration",
+    "retryEcommerceUsageSync",
+    "deleteEcommerceRecord",
+    "UcEcommerceRememberDeletedRecords",
+  ]) {
+    requireToken(errors, "ecommerce-task-page-methods.source.txt", methodsSource, token);
+  }
+
+  if (!content.includes("readCanonicalEcommerceTaskPageMethods() ||")) {
+    errors.push("patch-openclaw.js must use the checked-in ecommerce task methods source before falling back to generated assets");
   }
 
   requireToken(errors, "patch-openclaw.js", content, "ecommerce-carousel-export-1");
@@ -696,6 +740,10 @@ function verifyGeneratedTasksPage(errors) {
       "UcEcommerceLogExportPayload",
       "UcEcommerceExportLogName",
       "openEcommerceLocalPath",
+      "requestEcommerceRecordDelete",
+      "cancelEcommerceRecordDelete",
+      "requestEcommerceRecordsClear",
+      "cancelEcommerceRecordsClear",
       "retryEcommerceUsageSync",
       "重试同步用量",
       "uclaw-ecommerce-icon-button",
@@ -710,9 +758,17 @@ function verifyGeneratedTasksPage(errors) {
       "aria-label='查看结果'",
       "aria-label='打开文件夹'",
       "aria-label='删除记录'",
+      "aria-label='确认删除记录'",
+      "aria-label='取消删除'",
+      "aria-label='确认清空全部记录'",
+      "aria-label='取消清空'",
       "uclaw-ecommerce-warning-bubble",
       "deleteEcommerceRecord",
       "uclaw-ecommerce-record-delete",
+      "uclaw-ecommerce-record-delete-confirm",
+      "uclaw-ecommerce-record-delete-cancel",
+      "uclaw-ecommerce-record-clear-confirm",
+      "uclaw-ecommerce-record-clear-cancel",
       "已保存本地",
       "部分生成",
       "扣费异常",
@@ -723,6 +779,9 @@ function verifyGeneratedTasksPage(errors) {
       "localManifestPath",
       "ecommerce-record-pagination-1",
       "ecommerce-log-diagnostic-1",
+      "ecommerce-record-delete-confirm-1",
+      "ecommerce-record-density-1",
+      "ecommerce-record-tombstone-1",
       "diagnostic_status",
       "missing_fields",
       "当前日志为进行中快照",
@@ -853,6 +912,18 @@ function verifyGeneratedTasksPage(errors) {
     if (!/delete t\.dataUrl;t\.localPath\|\|delete t\.url/.test(content)) {
       errors.push(`${label} must strip image bytes and localPath-backed remote URLs before record persistence`);
     }
+    if (!/UcEcommerceMergeRecords\(\.\.\.e\)\{[\s\S]*UcEcommerceRecordIsDeleted\(r\)/.test(content)) {
+      errors.push(`${label} must filter deleted ecommerce records while importing local manifests`);
+    }
+    if (!/deleteEcommerceRecord\(e\)\{[\s\S]*UcEcommerceRememberDeletedRecords/.test(content)) {
+      errors.push(`${label} must tombstone deleted ecommerce records before saving localStorage`);
+    }
+    if (!/clearEcommerceRecords\(\)\{UcEcommerceRememberDeletedRecords/.test(content)) {
+      errors.push(`${label} must tombstone cleared ecommerce records so local manifests do not reappear after refresh`);
+    }
+    if (!/upsertEcommerceRecord\(e\)\{if\(UcEcommerceRecordIsDeleted\(e\)\)return/.test(content)) {
+      errors.push(`${label} must prevent progress or sync upserts from reviving deleted records`);
+    }
   }
 }
 
@@ -964,6 +1035,9 @@ function verifyServiceWorker(errors) {
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-local-manifest-import-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-1");
   requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-task-recreate-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-delete-confirm-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-density-1");
+  requireToken(errors, "node_modules/openclaw/dist/control-ui/sw.js", content, "ecommerce-record-tombstone-1");
 }
 
 /**
