@@ -1,6 +1,6 @@
 {
   "name": "u-claw",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Bavi-box - AI 助手桌面版，插上 U 盘就能用",
   "main": "src/main.js",
   "author": "Bavi-box <hello@u-claw.org> (https://u-claw.org)",
