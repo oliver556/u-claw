@@ -3444,6 +3444,9 @@ function startGateway(port) {
       NODE_COMPILE_CACHE: compileCacheDir,
       UCLAW_MEDIA_PREVIEW_ROOTS: mediaPreviewRoots,
     }));
+    if (!env.XAI_API_KEY && env.UCLAW_NEW_API_KEY) {
+      env.XAI_API_KEY = env.UCLAW_NEW_API_KEY;
+    }
 
     if (process.platform === 'win32') {
       env.OPENCLAW_DISABLE_BONJOUR = '1';
