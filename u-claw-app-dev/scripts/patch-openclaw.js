@@ -521,6 +521,83 @@ function patchChatPage() {
       throw new Error(`Could not patch terminal chat tool stream cleanup in ${file}`);
     }
 
+    // Project tool/runtime events as a compact execution trace instead of
+    // letting raw tool terminology dominate the chat timeline.
+    after = after.replaceAll(
+      "Activity: ${i} tool${i===1?``:`s`}",
+      "执行过程",
+    );
+    after = after.replaceAll(
+      "${S.label} · 执行过程 · ${i} 步",
+      "${S.label} · 执行过程",
+    );
+    after = after.replaceAll(
+      "${u.label} · 执行过程 · ${o} 步",
+      "${u.label} · 执行过程",
+    );
+    after = after.replaceAll(
+      "<span class=\"chat-sender-name\">Activity</span>",
+      "<span class=\"chat-sender-name\">执行过程</span>",
+    );
+    after = after.replaceAll(
+      "${hi(e.role,{name:r,avatar:t.assistantAvatar??null},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}",
+      "${hi(`assistant`,{name:r,avatar:t.assistantAvatar??null},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}",
+    );
+    after = after.replaceAll(
+      "let N=re?`Tool error`:M&&!T&&!_?M.label:`Tool output`",
+      "let N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`执行过程`",
+    );
+    after = after.replaceAll(
+      ",N=re?`Tool error`:M&&!T&&!_?M.label:`Tool output`",
+      ",N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`执行过程`",
+    );
+    after = after.replaceAll(
+      "Tx({label:d?`Tool error`:`Tool output`,text:e.outputText})",
+      "Tx({label:d?`步骤未完成`:`步骤输出`,text:e.outputText})",
+    );
+    after = after.replaceAll(
+      "Tx({label:`Tool error`,text:`No output — tool failed.`})",
+      "Tx({label:`步骤未完成`,text:`No output — tool failed.`})",
+    );
+    after = after.replaceAll(
+      "Tx({label:`Tool output`,text:`视频生成中，请稍等。完成后会自动显示视频。`})",
+      "Tx({label:`执行过程`,text:`视频生成中，请稍等。完成后会自动显示视频。`})",
+    );
+    after = after.replaceAll(
+      "let n=e.messages.flatMap(e=>lb(e.message,e.key)),i=n.length||e.messages.length,a=n.some(Xy)&&e.turnSucceeded!==!0,o=`activity:${e.key}`,l=t.isToolMessageExpanded?.(o)??a;return s`",
+      "let n=e.messages.flatMap(e=>lb(e.message,e.key)),i=n.length||e.messages.length,a=n.some(Xy)&&e.turnSucceeded!==!0,S=uClawChatActivityState(e,a,n),o=`activity:${e.key}`,l=t.isToolMessageExpanded?.(o)??a;return s`",
+    );
+    after = after.replaceAll(
+      "if(n===`tool`&&e.messages.length>1){",
+      "if(n===`tool`){",
+    );
+    after = after.replaceAll(
+      "class=\"chat-activity-group__summary ${a?`chat-activity-group__summary--error`:``}\"",
+      "class=\"chat-activity-group__summary ${a?`chat-activity-group__summary--error`:``} ${S.className}\"",
+    );
+    after = after.replaceAll(
+      "aria-label=${a?`执行过程 · ${i} 步, includes errors.`:c}",
+      "aria-label=${S.ariaLabel}",
+    );
+    after = after.replaceAll(
+      "<span class=\"chat-activity-group__icon\">${a?z.x:z.activity}</span>",
+      "<span class=\"chat-activity-group__icon\">${S.icon}</span>",
+    );
+    after = after.replaceAll(
+      `<span class="chat-activity-group__label"
+                >执行过程</span
+              >`,
+      `<span class="chat-activity-group__label"
+                >\${S.label} · 执行过程</span
+              >
+              \${S.detail?s\`<span class="chat-activity-group__state">\${S.detail}</span>\`:c}`,
+    );
+    if (
+      !after.includes("if(n===`tool`){")
+    ) {
+      throw new Error(`Could not patch compact tool activity rendering in ${file}`);
+    }
+
     const sessionRefreshAnchor =
       "function ph(e){return e.sessions.refresh({...fh(e),...Me(e,e.sessionKey),force:!0})}function mh(e,t){";
     const sessionRefreshWithStatusPollingV1 =
@@ -691,6 +768,121 @@ function patchChatPage() {
       );
     }
 
+    let readingStatusFunctions = `function uClawChatToolDisplayName(e){let t=typeof e=="string"?e.trim():"";if(!t)return"工具";let r=t.toLowerCase(),n={image_generate:"图片生成",image_generation:"图片生成","image generation":"图片生成",video_generate:"视频生成",video_generation:"视频生成","video generation":"视频生成",music_generate:"音乐生成",web_search:"网页检索",browser_use:"浏览器操作",session_status:"状态同步"};return n[r]??t.replace(/[_-]+/g," ")}function uClawChatActivityState(e,t,n=[]){let r=null,i=!1,a=!1,o=!1;for(let e of n)e&&typeof e=="object"&&(e.name&&(r=e),e.name==="video_generate"&&(i=!0),e.name==="image_generate"&&(o=!0),typeof e.outputText=="string"&&e.outputText.trim()&&(a=!0));let s=r?.name?uClawChatToolDisplayName(r.name):"",l=e?.isStreaming||e?.turnSucceeded!==!0&&!t;if(t)return{label:"部分未完成",detail:s?"请展开查看："+s:"请展开查看",className:"is-warning",icon:z.x,running:!1,ariaLabel:"部分未完成 · 执行过程 · "+(n.length||1)+" 步"};if(l)return{label:"进行中",detail:s?"当前："+s:"正在处理",className:"is-running",icon:z.activity,running:!0,ariaLabel:"进行中 · 执行过程 · "+(n.length||1)+" 步"};return{label:"已完成",detail:i?a?"视频结果已返回":"视频生成已提交，完成后自动显示":o?a?"图片结果已返回":"图片生成已提交":"",className:"is-done",icon:z.activity,running:!1,ariaLabel:"已完成 · 执行过程 · "+(n.length||1)+" 步"}}function uClawChatMessageToolName(e){let t=Q(e);if(!t)return null;let n=Array.isArray(t.content)?t.content:[];for(let e of n){if(!e||typeof e!="object")continue;let t=typeof e.name=="string"?e.name:typeof e.toolName=="string"?e.toolName:typeof e.tool_name=="string"?e.tool_name:"";if(t.trim())return t.trim()}let r=typeof t.name=="string"?t.name:typeof t.toolName=="string"?t.toolName:typeof t.tool_name=="string"?t.tool_name:"";return r.trim()||null}function uClawChatMessageHasToolResult(e){let t=Q(e);if(!t)return!1;let n=Array.isArray(t.content)?t.content:[];return n.some(e=>{if(!e||typeof e!="object")return!1;let t=typeof e.type=="string"?e.type.toLowerCase():"";return t==="toolresult"||t==="tool_result"||t==="tool-result"})}function uClawChatReadingStatus(e,t={}){if(t.pendingSend)return"正在发送";if(t.activeRun||e.uClawRestoredRunSyncing)return"正在同步进度";let n=Array.isArray(e.toolMessages)?e.toolMessages:[],r=null,i=!1,a=!1;for(let e of n){let t=uClawChatMessageToolName(e);t&&(r=t),uClawChatMessageHasToolResult(e)?a=!0:i=!0}if(i)return r==="video_generate"?"正在提交视频生成":"正在执行 · 当前："+uClawChatToolDisplayName(r);if(n.length>0||a||Array.isArray(e.streamSegments)&&e.streamSegments.length>0)return"正在生成回复";return"正在思考"}function uClawChatStreamRunItems(e){let t=[],n=[],r=null,i=!1,a=null,o=()=>{n.length>0&&(t.push({kind:\`stream\`,key:\`stream-merged:\${a??t.length}\`,text:n.join(\`\\n\\n\`),startedAt:r??Date.now(),isStreaming:i}),n=[],r=null,i=!1,a=null)};for(let s of e){if(s.kind===\`stream\`){let e=typeof s.text==\`string\`?s.text.trim():\`\`;if(e){n.push(e),a??=s.key??\`live\`;let t=typeof s.startedAt==\`number\`?s.startedAt:null;r=r==null?t??Date.now():Math.min(r,t??r),i=i||s.isStreaming===!0}continue}o(),t.push(s)}return o(),t}function mS(e={}){let t=typeof e.status=="string"&&e.status.trim()?e.status.trim():"正在思考";return s\`
+    <div class="chat-bubble chat-reading-indicator uclaw-chat-reading-status" role="status" aria-live="polite">
+      <span class="chat-reading-indicator__dots" aria-hidden="true"> <span></span><span></span><span></span> </span>
+      <span class="uclaw-chat-reading-status__label">\${t}</span>
+    </div>
+  \`}`;
+    readingStatusFunctions = readingStatusFunctions
+      .replace('e.name==="video_generate"&&(i=!0),e.name==="image_generate"&&(o=!0)', 'uClawChatToolDisplayName(e.name)==="视频生成"&&(i=!0),uClawChatToolDisplayName(e.name)==="图片生成"&&(o=!0)')
+      .replace('let s=r?.name?uClawChatToolDisplayName(r.name):"",l=e?.isStreaming||e?.turnSucceeded!==!0&&!t;', 'let s=r?.name?uClawChatToolDisplayName(r.name):"",c=e?.hasFinalContents===!0,l=e?.isStreaming||e?.turnSucceeded!==!0&&!t;')
+      .replace('if(l)return{label:"进行中",detail:s?"当前："+s:"正在处理",className:"is-running",icon:z.activity,running:!0,ariaLabel:"进行中 · 执行过程 · "+(n.length||1)+" 步"};', 'if(l){let e=o&&a&&!c?"正在等待图片结果":i&&a&&!c?"正在等待视频结果":s?"当前："+s:"正在处理";return{label:"进行中",detail:e,className:"is-running",icon:z.activity,running:!0,ariaLabel:"进行中 · 执行过程 · "+(n.length||1)+" 步"}}')
+      .replace('if(i)return r==="video_generate"?"正在提交视频生成":"正在执行 · 当前："+uClawChatToolDisplayName(r);if(n.length>0||a||Array.isArray(e.streamSegments)&&e.streamSegments.length>0)return"正在生成回复";', 'if(i)return r==="video_generate"?"正在提交视频生成":"正在执行 · 当前："+uClawChatToolDisplayName(r);if(a&&uClawChatToolDisplayName(r)==="图片生成")return"正在等待图片结果";if(a&&uClawChatToolDisplayName(r)==="视频生成")return"正在等待视频结果";if(n.length>0||a||Array.isArray(e.streamSegments)&&e.streamSegments.length>0)return"正在生成回复";');
+    const readingStatusStart = after.includes("function uClawChatToolDisplayName(")
+      ? after.indexOf("function uClawChatToolDisplayName(")
+      : after.indexOf("function mS(");
+    const readingStatusEnd = readingStatusStart >= 0 ? after.indexOf("function hS(", readingStatusStart) : -1;
+    if (readingStatusStart >= 0 && readingStatusEnd > readingStatusStart) {
+      after = `${after.slice(0, readingStatusStart)}${readingStatusFunctions}${after.slice(readingStatusEnd)}`;
+    }
+    after = after.replaceAll(
+      "e.kind===`reading-indicator`?mS():",
+      "e.kind===`reading-indicator`?mS(e):",
+    );
+    let compactRenderItemsFunction = [
+      "function uClawRenderItemRole(e){return String(e?.role??``).toLowerCase()}",
+      "function uClawIsToolRenderItem(e){return e?.kind===`group`&&uClawRenderItemRole(e)===`tool`}",
+      "function uClawIsAssistantRenderItem(e){let t=uClawRenderItemRole(e);return e?.kind===`stream-run`||e?.kind===`reading-indicator`||e?.kind===`group`&&t===`assistant`}",
+      "function uClawAssistantTurnTimestamp(e){let t=[];for(let n of e){typeof n?.timestamp==`number`&&t.push(n.timestamp);if(n?.kind===`stream-run`&&Array.isArray(n.parts))for(let e of n.parts)typeof e?.startedAt==`number`&&t.push(e.startedAt)}return t.length?Math.min(...t):Date.now()}",
+      "function uClawAssistantTurnHasRunningContent(e){return e.some(e=>e?.kind===`reading-indicator`||e?.kind===`stream-run`&&Array.isArray(e.parts)&&e.parts.some(e=>e?.kind===`reading-indicator`||e?.isStreaming===!0))}",
+      "function uClawAssistantTurnHasFinalContent(e){return e.some(e=>e?.kind===`group`&&uClawRenderItemRole(e)===`assistant`&&Array.isArray(e.messages)&&e.messages.length>0||e?.kind===`stream-run`&&Array.isArray(e.parts)&&e.parts.some(e=>e?.kind===`stream`&&String(e.text??``).trim()))}",
+      "function uClawIsAssistantPendingRenderItem(e){return e?.kind===`reading-indicator`||e?.kind===`stream-run`&&Array.isArray(e.parts)&&e.parts.some(e=>e?.kind===`reading-indicator`)&&!uClawAssistantTurnHasFinalContent([e])}",
+      "function uClawAssistantTurnPendingStatus(e){let t=null;for(let n of e){if(n?.kind===`reading-indicator`&&typeof n.status==`string`&&n.status.trim())t=n.status.trim();else if(n?.kind===`stream-run`&&Array.isArray(n.parts))for(let e of n.parts)e?.kind===`reading-indicator`&&typeof e.status==`string`&&e.status.trim()&&(t=e.status.trim())}return t}",
+      "function uClawMergeToolRenderItems(e){let t=e.flatMap(e=>Array.isArray(e.messages)?e.messages:[]);if(t.length===0)return null;let n=e[0],r=e.map(e=>typeof e.timestamp==`number`?e.timestamp:null).filter(e=>e!==null),i=r.length?Math.min(...r):Date.now();return{...n,key:`uclaw-execution:${n.key}:${t.length}`,role:`tool`,messages:t,timestamp:i,turnSucceeded:e.some(e=>e.turnSucceeded===!1)?!1:e.some(e=>e.turnSucceeded===!0)?!0:void 0,isStreaming:e.some(e=>e.isStreaming===!0)}}",
+      "function uClawBuildAssistantTurn(e){let t=e.filter(uClawIsToolRenderItem),q=e=>!uClawIsAssistantPendingRenderItem(e);if(t.length===0){let t=e.filter(uClawIsAssistantRenderItem);if(t.length===0)return e;let n=uClawAssistantTurnHasRunningContent(t),r=!n&&uClawAssistantTurnHasFinalContent(t),i={kind:`group`,key:`uclaw-execution:plain:${t[0]?.key??e.length}`,role:`tool`,messages:[],timestamp:uClawAssistantTurnTimestamp(e),turnSucceeded:r,isStreaming:n,processContents:n?t.filter(q):[],pendingStatus:uClawAssistantTurnPendingStatus(t)};return[{kind:`assistant-turn`,key:`uclaw-assistant-turn:${i.key}:${e.length}`,execution:i,contents:r?t.filter(q):[],timestamp:uClawAssistantTurnTimestamp(e)}]}let r=e.lastIndexOf(t[t.length-1]),i=e.filter((t,n)=>!uClawIsToolRenderItem(t)&&n>r&&uClawIsAssistantRenderItem(t)),a=e.filter((t,n)=>!uClawIsToolRenderItem(t)&&n<=r&&uClawIsAssistantRenderItem(t)),o=uClawMergeToolRenderItems(t);if(!o)return e;let s=uClawAssistantTurnHasRunningContent(i),c=uClawAssistantTurnHasFinalContent(i),l=(o.messages??[]).flatMap(e=>lb(e.message,e.key)),u=l.length>0&&l.every(e=>e.outputText!==void 0||e.isError===!0),d=l.some(Xy),f=!s&&(o.turnSucceeded===!0||c||u&&!d),p=f?i.filter(e=>!uClawIsAssistantPendingRenderItem(e)):[],m=f?i.filter(uClawIsAssistantPendingRenderItem):i;return f&&(o.turnSucceeded=!0,o.isStreaming=!1),!f&&!d&&(o.isStreaming=!0),o.processContents=[...a.filter(q),...m.filter(q)],o.pendingStatus=uClawAssistantTurnPendingStatus(i),[{kind:`assistant-turn`,key:`uclaw-assistant-turn:${o.key}:${e.length}`,execution:o,contents:p,timestamp:uClawAssistantTurnTimestamp(e)}]}",
+      "function uClawPushCompactTurn(e,t){if(t.length===0)return;for(let n of uClawBuildAssistantTurn(t))e.push(n)}",
+      "function uClawCompactChatRenderItems(e){let t=[],n=[];for(let r of e){let i=r?.kind===`divider`||r?.kind===`group`&&uClawRenderItemRole(r)===`user`;if(i){uClawPushCompactTurn(t,n),n=[],t.push(r);continue}n.push(r)}return uClawPushCompactTurn(t,n),t}",
+      "function uClawRenderAssistantTurnPart(e,t){if(e?.kind===`stream-run`)return uClawChatStreamRunItems(e.parts).map(e=>e.kind===`reading-indicator`?mS(e):aC({role:`assistant`,content:[{type:`text`,text:e.text}],timestamp:e.startedAt},e.key,{isStreaming:e.isStreaming,showReasoning:!1},t.onOpenSidebar));if(e?.kind===`reading-indicator`)return mS(e);if(e?.kind===`group`&&uClawRenderItemRole(e)===`assistant`)return e.messages.map((n,r)=>aC(n.message,n.key,gS(e,n,r,t),t.onOpenSidebar));return c}",
+      "function uClawAssistantTurn(e,t={}){let n=t.assistantName??`Assistant`,r=t.assistantAvatar??null,i=e.execution,a=(i?.messages??[]).flatMap(e=>lb(e.message,e.key)),o=Math.max(a.length||(i?.messages??[]).length,i?.processContents?.length||0,1),l=a.some(Xy)&&i?.turnSucceeded!==!0,u=uClawChatActivityState(i,l,a),y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);u.running&&y&&(u={...u,label:y,detail:``,ariaLabel:`${y} · 执行过程 · ${o} 步`});let d=`activity:${i?.key??e.key}:${u.running||l?`running`:`done`}`,b=t.isToolMessageExpanded?.(d),f=u.running||l?b!==!1:b===!0,p=e.contents??[],v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0,m=p.length>0?uClawAssistantTurnTimestamp(p):e.timestamp;return s`<div class=\"chat-group assistant chat-group--assistant-turn\">${hi(`assistant`,{name:n,avatar:r},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}<div class=\"chat-group-messages\">${i?s`<div class=\"chat-activity-group chat-activity-group--turn ${f?`is-open`:``}\"><button class=\"chat-activity-group__summary ${l?`chat-activity-group__summary--error`:``} ${u.className}\" type=\"button\" aria-expanded=${String(f&&v)} aria-label=${u.ariaLabel} @click=${e=>{px(e)&&v&&t.onToggleToolMessageExpanded?.(d,f)}}>${u.running?s`<span class=\"chat-activity-group__spinner\" aria-hidden=\"true\"></span>`:s`<span class=\"chat-activity-group__icon\">${u.icon}</span>`}<span class=\"chat-activity-group__label\">${u.label} · 执行过程</span>${u.detail?s`<span class=\"chat-activity-group__state\">${u.detail}</span>`:c}${v?s`<span class=\"collapse-chevron ${f?``:`collapse-chevron--collapsed`}\" aria-hidden=\"true\">${z.chevronDown}</span>`:c}</button>${f&&v?s`<div class=\"chat-activity-group__body\">${i.processContents?.length?s`<div class=\"chat-activity-group__process\">${i.processContents.map(e=>uClawRenderAssistantTurnPart(e,t))}</div>`:c}${i.messages.map((n,r)=>aC(n.message,n.key,gS(i,n,r,t),t.onOpenSidebar))}</div>`:c}</div>`:c}${p.map(e=>uClawRenderAssistantTurnPart(e,t))}<div class=\"chat-group-footer\"><div class=\"chat-group-footer__meta\"><span class=\"chat-sender-name\">${n}</span>${zx(m)}</div>${t.onDelete?s`<div class=\"chat-group-footer-actions\">${kS(t.onDelete,`right`)}</div>`:c}</div></div></div>`}",
+    ].join("");
+    compactRenderItemsFunction = compactRenderItemsFunction
+      .replace("let s=uClawAssistantTurnHasRunningContent(i),c=uClawAssistantTurnHasFinalContent(i),l=(o.messages??[]).flatMap(e=>lb(e.message,e.key)),u=l.length>0&&l.every(e=>e.outputText!==void 0||e.isError===!0),d=l.some(Xy),f=!s&&(o.turnSucceeded===!0||c||u&&!d),p=f?i.filter(e=>!uClawIsAssistantPendingRenderItem(e)):[],m=f?i.filter(uClawIsAssistantPendingRenderItem):i;return f&&(o.turnSucceeded=!0,o.isStreaming=!1),!f&&!d&&(o.isStreaming=!0),o.processContents=[...a.filter(q),...m.filter(q)],o.pendingStatus=uClawAssistantTurnPendingStatus(i),", "let s=uClawAssistantTurnHasRunningContent(i),c=uClawAssistantTurnHasFinalContent(i),l=(o.messages??[]).flatMap(e=>lb(e.message,e.key)),u=l.length>0&&l.every(e=>e.outputText!==void 0||e.isError===!0),d=l.some(Xy),h=l.some(e=>uClawChatToolDisplayName(e.name)===`图片生成`),f=!s&&(o.turnSucceeded===!0||c||u&&!d&&!h),p=f?i.filter(e=>!uClawIsAssistantPendingRenderItem(e)):[],m=f?i.filter(uClawIsAssistantPendingRenderItem):i;return o.hasFinalContents=c,f&&(o.turnSucceeded=!0,o.isStreaming=!1),!f&&!d&&(o.isStreaming=!0),o.processContents=[...a.filter(q),...m.filter(q)],o.pendingStatus=uClawAssistantTurnPendingStatus(i),")
+      .replace("y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);", "y=i?.pendingStatus||(u.running&&typeof u.detail==`string`?(u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:u.detail.startsWith(`正在`)?u.detail:null):null);");
+    const compactRenderItemsStart = after.indexOf("function uClawRenderItemRole(") >= 0
+      ? after.indexOf("function uClawRenderItemRole(")
+      : after.indexOf("function uClawIsToolRenderItem(");
+    const compactRenderItemsEnd = compactRenderItemsStart >= 0 ? after.indexOf("function mS(", compactRenderItemsStart) : -1;
+    if (compactRenderItemsStart >= 0 && compactRenderItemsEnd > compactRenderItemsStart) {
+      after = `${after.slice(0, compactRenderItemsStart)}${compactRenderItemsFunction}${after.slice(compactRenderItemsEnd)}`;
+    } else {
+      after = after.replace("function mS(e={}){", `${compactRenderItemsFunction}function mS(e={}){`);
+    }
+    after = after.replaceAll(
+      "e.map(e=>e.kind===`reading-indicator`?mS(e):aC({role:`assistant`,content:[{type:`text`,text:e.text}],timestamp:e.startedAt},e.key,{isStreaming:e.isStreaming,showReasoning:!1},n))",
+      "uClawChatStreamRunItems(e).map(e=>e.kind===`reading-indicator`?mS(e):aC({role:`assistant`,content:[{type:`text`,text:e.text}],timestamp:e.startedAt},e.key,{isStreaming:e.isStreaming,showReasoning:!1},n))",
+    );
+    after = after.replaceAll(
+      "l(nx(h),e=>e.key,t=>t.kind===`divider`?",
+      "l(uClawCompactChatRenderItems(nx(h)),e=>e.key,t=>t.kind===`divider`?",
+    );
+    const streamRunRenderBranch =
+      ":t.kind===`stream-run`?hS(t.parts,{onOpenSidebar:e.onOpenSidebar,assistant:u,basePath:e.basePath,authToken:e.assistantAttachmentAuthToken??null}):t.kind===`group`?";
+    const assistantTurnRenderPrefix =
+      ":t.kind===`assistant-turn`?m.has(t.key)?c:uClawAssistantTurn(t,{onOpenSidebar:e.onOpenSidebar,sessionKey:e.sessionKey,agentId:e.fullMessageAgentId,showReasoning:o,showToolCalls:e.showToolCalls,autoExpandToolCalls:!!e.autoExpandToolCalls,isToolMessageExpanded:e=>g.get(e),onToggleToolMessageExpanded:(e,t)=>{g.set(e,!(t??g.get(e)??!1)),n()},isToolExpanded:e=>g.get(e)??!1,onToggleToolExpanded:_,onRequestUpdate:n,onAssistantAttachmentLoaded:e.onAssistantAttachmentLoaded,assistantName:e.assistantName===`Assistant`?`Bavi-box`:e.assistantName,assistantAvatar:u.avatar,userName:e.userName??null,userAvatar:e.userAvatar??null,basePath:e.basePath,localMediaPreviewRoots:e.localMediaPreviewRoots??[],assistantAttachmentAuthToken:e.assistantAttachmentAuthToken??null,canvasPluginSurfaceUrl:e.canvasPluginSurfaceUrl,embedSandboxMode:e.embedSandboxMode??`scripts`,allowExternalEmbedUrls:e.allowExternalEmbedUrls??!1,contextWindow:x,onDelete:()=>{m.delete(t.key),n()}})";
+    if (!after.includes(assistantTurnRenderPrefix)) {
+      after = after.replaceAll(streamRunRenderBranch, `${assistantTurnRenderPrefix}${streamRunRenderBranch}`);
+    }
+    while (after.includes(`${assistantTurnRenderPrefix}${assistantTurnRenderPrefix}`)) {
+      after = after.replaceAll(`${assistantTurnRenderPrefix}${assistantTurnRenderPrefix}`, assistantTurnRenderPrefix);
+    }
+    after = after.replaceAll(
+      "t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`})",
+      "t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:pending`,status:uClawChatReadingStatus(e,{pendingSend:!0})})",
+    );
+    after = after.replaceAll(
+      "e.stream.trim().length===0&&t.push({kind:`reading-indicator`,key:n})",
+      "e.stream.trim().length===0&&t.push({kind:`reading-indicator`,key:n,status:uClawChatReadingStatus(e)})",
+    );
+    after = after.replaceAll(
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,showToolCalls:e.showToolCalls",
+      "streamStartedAt:e.streamStartedAt,queue:e.queue,activeRun:i&&Je(i),showToolCalls:e.showToolCalls",
+    );
+    after = after.replaceAll(
+      "e.queue===t.queue&&e.showToolCalls===t.showToolCalls",
+      "e.queue===t.queue&&e.activeRun===t.activeRun&&e.showToolCalls===t.showToolCalls",
+    );
+    after = after.replaceAll(
+      "let h=Math.max(f.length,i.length),g=null,_=new Map;for(let n=0;n<h;n++){if(n<f.length){let r=f[n],i=Lb(r.text),a=fs(r),o=a?ps(i,g):i;if(a&&i.length>0&&(g=i),o.length>0){let i=`stream-seg:${e.sessionKey}:${n}`;t.push({kind:`stream`,key:i,text:o,startedAt:r.ts,isStreaming:!1});let a=r.toolCallId?.trim(),s=a?m.get(a):void 0;s&&_.set(s,i)}}let r=p[n];r&&e.showToolCalls&&t.push({kind:`message`,key:r.key,message:r.message})}for(let n of d){",
+      "let h=f.length,g=null,_=new Map;if(e.showToolCalls)for(let e of p)t.push({kind:`message`,key:e.key,message:e.message});for(let n=0;n<h;n++){let r=f[n],i=Lb(r.text),a=fs(r),o=a?ps(i,g):i;if(a&&i.length>0&&(g=i),o.length>0){let i=`stream-seg:${e.sessionKey}:${n}`;t.push({kind:`stream`,key:i,text:o,startedAt:r.ts,isStreaming:!1})}}for(let n of d){",
+    );
+    after = after.replaceAll(
+      "):e.stream.trim().length===0&&t.push({kind:`reading-indicator`,key:n,status:uClawChatReadingStatus(e)})}return Tb(bb(Fb(Sb(Ub(t,_)))))",
+      "):e.stream.trim().length===0&&t.push({kind:`reading-indicator`,key:n,status:uClawChatReadingStatus(e)})}else e.activeRun===!0&&t.push({kind:`reading-indicator`,key:`stream:${e.sessionKey}:active`,status:uClawChatReadingStatus(e,{activeRun:!0})});return Tb(bb(Fb(Sb(Ub(t,_)))))",
+    );
+    if (
+      !after.includes("function uClawChatReadingStatus(")
+      || !after.includes("e.kind===`reading-indicator`?mS(e):")
+      || !after.includes("function uClawChatStreamRunItems(")
+      || !after.includes("function uClawCompactChatRenderItems(")
+      || !after.includes("function uClawPushCompactTurn(")
+      || !after.includes("kind:`assistant-turn`")
+      || !after.includes("function uClawAssistantTurn(")
+      || !after.includes("t.kind===`assistant-turn`?")
+      || !after.includes("uClawChatStreamRunItems(e).map")
+      || !after.includes("uClawCompactChatRenderItems(nx(h))")
+      || !after.includes("status:uClawChatReadingStatus(e)")
+      || !after.includes("if(e.showToolCalls)for(let e of p)t.push({kind:`message`,key:e.key,message:e.message})")
+      || !after.includes("activeRun:i&&Je(i)")
+      || !after.includes("e.activeRun===t.activeRun")
+      || !after.includes("status:uClawChatReadingStatus(e,{activeRun:!0})")
+      || !after.includes("function uClawIsAssistantPendingRenderItem(")
+      || !after.includes("pendingStatus")
+      || !after.includes("chat-activity-group__spinner")
+    ) {
+      throw new Error(`Could not patch semantic chat reading status in ${file}`);
+    }
+
     const userImageBrowserOpen = "an(e,{allowDataImage:!0})";
     const userImageLightboxOpen = "uClawOpenMediaLightbox(e,{kind:`image`})";
     if (after.includes(userImageBrowserOpen)) {
@@ -826,6 +1018,93 @@ function patchChatPage() {
       "chatAttachments:[],chatAttachmentsBySession:{},chatRunId:null",
     );
 
+    const liveSessionStateFunctions = [
+      "function uClawLiveSessions(e){let t=globalThis.__uclawChatLiveBySession;return t instanceof Map||(t=new Map,globalThis.__uclawChatLiveBySession=t),e.chatLiveBySession=t,t}",
+      "function uClawLiveSessionSnapshot(e){return{chatRunId:e.chatRunId??null,chatMessages:[...e.chatMessages??[]],chatQueue:[...e.chatQueue??[]],chatStream:e.chatStream??null,chatStreamStartedAt:e.chatStreamStartedAt??null,chatStreamSegments:[...e.chatStreamSegments??[]],chatToolMessages:[...e.chatToolMessages??[]],toolStreamOrder:[...e.toolStreamOrder??[]],toolEntries:e.toolStreamById instanceof Map?[...e.toolStreamById.entries()]:[],chatRunStatus:e.chatRunStatus??null,uClawRestoredRunSyncing:e.uClawRestoredRunSyncing===!0,savedAt:Date.now()}}",
+      "function uClawEmptyLiveSession(e){let t=e?.runId??null;return{chatRunId:t,chatMessages:[],chatQueue:[],chatStream:null,chatStreamStartedAt:null,chatStreamSegments:[],chatToolMessages:[],toolStreamOrder:[],toolEntries:[],chatRunStatus:null,uClawRestoredRunSyncing:!1,savedAt:Date.now()}}",
+      "function uClawHasLiveSession(e){return!!(e.chatRunId||Array.isArray(e.chatQueue)&&e.chatQueue.length>0||e.chatStream!==null||Array.isArray(e.chatStreamSegments)&&e.chatStreamSegments.length>0||Array.isArray(e.chatToolMessages)&&e.chatToolMessages.length>0||Array.isArray(e.toolStreamOrder)&&e.toolStreamOrder.length>0)}",
+      "function uClawSaveLiveSession(e,t){if(!t)return;let n=uClawLiveSessions(e);if(!uClawHasLiveSession(e)){n.delete(t);return}n.set(t,uClawLiveSessionSnapshot(e));for(;n.size>30;){let e=n.keys().next().value;n.delete(e)}}",
+      "function uClawForgetLiveSession(e,t){if(!t)return;uClawLiveSessions(e).delete(t)}",
+      "function uClawActiveSessionStillRunning(e,t){let n=e.sessionsResult?.sessions?.find(e=>se(e.key,t));return!!(n&&Je(n))}",
+      "function uClawMergeLiveQueue(e,t){if(!Array.isArray(t)||t.length===0)return;let n=new Set((e.chatQueue??[]).map(e=>e.id));e.chatQueue=[...e.chatQueue??[],...t.filter(e=>!n.has(e.id))]}",
+      "function uClawApplyLiveSession(e,t){Array.isArray(t.chatMessages)&&t.chatMessages.length>0&&(e.chatMessages=ql(e.chatMessages,t.chatMessages)),uClawMergeLiveQueue(e,t.chatQueue),e.chatRunId=t.chatRunId??null,e.chatStream=typeof t.chatStream==`string`?t.chatStream:null,e.chatStreamStartedAt=t.chatStreamStartedAt??(e.chatStream!==null?Date.now():null),e.chatStreamSegments=[...t.chatStreamSegments??[]],e.chatToolMessages=[...t.chatToolMessages??[]],e.toolStreamOrder=[...t.toolStreamOrder??[]],e.toolStreamById=new Map(t.toolEntries??[]),e.chatRunStatus=t.chatRunStatus??null,e.uClawRestoredRunSyncing=t.uClawRestoredRunSyncing===!0}",
+      "function uClawRestoreLiveSession(e,t){let n=uClawLiveSessions(e),r=n.get(t);if(r)return uClawApplyLiveSession(e,r),!0;if(uClawActiveSessionStillRunning(e,t))return e.chatRunId=null,e.chatRunStatus=null,e.chatStream=``,e.chatStreamStartedAt=Date.now(),e.uClawRestoredRunSyncing=!0,!0;return e.uClawRestoredRunSyncing=!1,!1}",
+      "function uClawRememberBackgroundDelta(e,t){let n=typeof t?.sessionKey==`string`&&t.sessionKey.trim()?t.sessionKey:null;if(!n)return!1;let r=uClawLiveSessions(e),i=r.get(n)??uClawEmptyLiveSession(t),a=Eg(typeof i.chatStream==`string`?i.chatStream:null,t);return typeof a==`string`&&!Ml(a)&&!Li(t.message)?(i.chatRunId=t.runId??i.chatRunId??null,i.chatStream=a,i.chatStreamStartedAt=i.chatStreamStartedAt??Date.now(),i.uClawRestoredRunSyncing=!1,i.savedAt=Date.now(),r.set(n,i),!0):!1}",
+      "function uClawRememberBackgroundStreamItem(e,t){let n=typeof t?.sessionKey==`string`&&t.sessionKey.trim()?t.sessionKey:null;if(!n)return!1;let r=uClawLiveSessions(e),i=r.get(n)??uClawEmptyLiveSession(t),a={chatRunId:i.chatRunId??t.runId??null,chatMessages:i.chatMessages??[],chatQueue:i.chatQueue??[],chatStream:i.chatStream??null,chatStreamStartedAt:i.chatStreamStartedAt??null,chatStreamSegments:[...i.chatStreamSegments??[]],toolStreamById:new Map(i.toolEntries??[]),toolStreamOrder:[...i.toolStreamOrder??[]],chatToolMessages:[...i.chatToolMessages??[]]};if(Qs(a,t));else if(t.stream===`tool`){let e=t.data??{},n=typeof e.toolCallId==`string`?e.toolCallId:``;if(!n)return!1;let r=typeof e.name==`string`?e.name:`tool`,i=typeof e.phase==`string`?e.phase:``,o=i===`start`?e.args:void 0,s=i===`update`?ks(e.partialResult):i===`result`?ks(e.result):void 0,c=Date.now(),l=a.toolStreamById.get(n);l?(l.name=r,o!==void 0&&(l.args=o),s!==void 0&&(l.output=s||void 0),l.updatedAt=c):(l={toolCallId:n,runId:t.runId,sessionKey:t.sessionKey,name:r,args:o,output:s||void 0,startedAt:typeof t.ts==`number`?t.ts:c,updatedAt:c,message:{}},a.toolStreamById.set(n,l),a.toolStreamOrder.push(n));l.message=Ns(l),a.toolStreamOrder.length>Ss&&(a.toolStreamOrder=a.toolStreamOrder.slice(-Ss),a.toolStreamById=new Map(a.toolStreamOrder.map(e=>[e,a.toolStreamById.get(e)]).filter(e=>!!e[1]))),a.chatToolMessages=a.toolStreamOrder.map(e=>a.toolStreamById.get(e)?.message).filter(e=>!!e)}else return!1;return r.set(n,{chatRunId:a.chatRunId,chatMessages:a.chatMessages,chatQueue:a.chatQueue,chatStream:a.chatStream,chatStreamStartedAt:a.chatStreamStartedAt,chatStreamSegments:a.chatStreamSegments,chatToolMessages:a.chatToolMessages,toolStreamOrder:a.toolStreamOrder,toolEntries:[...a.toolStreamById.entries()],chatRunStatus:i.chatRunStatus??null,uClawRestoredRunSyncing:!1,savedAt:Date.now()}),!0}",
+    ].join("");
+    const liveSessionStateStart = after.indexOf("function uClawLiveSessions(");
+    const liveSessionStateEnd = liveSessionStateStart >= 0
+      ? after.indexOf("function g_(e,t){", liveSessionStateStart)
+      : -1;
+    if (liveSessionStateStart >= 0 && liveSessionStateEnd > liveSessionStateStart) {
+      after = `${after.slice(0, liveSessionStateStart)}${liveSessionStateFunctions}${after.slice(liveSessionStateEnd)}`;
+    } else if (!after.includes("function uClawSaveLiveSession(")) {
+      after = after.replace(
+        "function uClawRestoreComposerAttachments(e,t){return[...e.chatAttachmentsBySession?.[t]??[]]}function g_(e,t){",
+        `function uClawRestoreComposerAttachments(e,t){return[...e.chatAttachmentsBySession?.[t]??[]]}${liveSessionStateFunctions}function g_(e,t){`,
+      );
+    }
+    after = after.replace(
+      "Xu(e,n),m_(e,n),uClawSaveComposerAttachments(e,n),g_(e,n),e.sessionKey=t",
+      "Xu(e,n),m_(e,n),uClawSaveComposerAttachments(e,n),g_(e,n),uClawSaveLiveSession(e,n),e.sessionKey=t",
+    );
+    after = after.replace(
+      "e.chatStreamStartedAt=null,gc(e,{clearLocalRun:!0,clearChatStream:!0,clearToolStream:!0,clearSideResultTerminalRuns:!0,clearRunStatus:!0}),e.resetChatScroll()",
+      "e.chatStreamStartedAt=null;let r=uClawRestoreLiveSession(e,t);gc(e,{clearLocalRun:!r,clearChatStream:!r,clearToolStream:!r,clearSideResultTerminalRuns:!0,clearRunStatus:!r}),r&&uClawScheduleChatStatusPoll(e,{sessionKey:t,runId:e.chatRunId}),e.resetChatScroll()",
+    );
+    after = after.replace(
+      "chatMessagesBySession:new Map,eventLogBuffer:[]",
+      "chatMessagesBySession:new Map,chatLiveBySession:new Map,eventLogBuffer:[]",
+    );
+    after = after.replace(
+      "function $s(e,t){if(!t)return;let n=typeof t.sessionKey==`string`?t.sessionKey:void 0;if(n&&!ve(e,n,K(t.agentId)))return;if(t.stream===`compaction`)",
+      "function $s(e,t){if(!t)return;let n=typeof t.sessionKey==`string`?t.sessionKey:void 0;if(n&&!ve(e,n,K(t.agentId))){uClawRememberBackgroundStreamItem(e,t);return}e.uClawRestoredRunSyncing=!1;if(t.stream===`compaction`)",
+    );
+    after = after.replace(
+      "function $s(e,t){if(!t)return;let n=typeof t.sessionKey==`string`?t.sessionKey:void 0;if(n&&!ve(e,n,K(t.agentId)))return;e.uClawRestoredRunSyncing=!1;if(t.stream===`compaction`)",
+      "function $s(e,t){if(!t)return;let n=typeof t.sessionKey==`string`?t.sessionKey:void 0;if(n&&!ve(e,n,K(t.agentId))){uClawRememberBackgroundStreamItem(e,t);return}e.uClawRestoredRunSyncing=!1;if(t.stream===`compaction`)",
+    );
+    after = after.replace(
+      "t.clearChatStream&&(e.chatStream=null,e.chatStreamStartedAt=null)",
+      "t.clearChatStream&&(e.chatStream=null,e.chatStreamStartedAt=null,e.uClawRestoredRunSyncing=!1)",
+    );
+    after = after.replace(
+      "if(!r&&!i){if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}}uClawHandleBackgroundSessionTerminal(e,t);return null}",
+      "if(!r&&!i){if(t.state===`delta`)uClawRememberBackgroundDelta(e,t);else if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}uClawForgetLiveSession(e,t.sessionKey)}uClawHandleBackgroundSessionTerminal(e,t);return null}",
+    );
+    after = after.replace(
+      /(?:pu\(e\)&&!e\.chatRunId&&e\.chatStream===null&&\(e\.chatStream=``,e\.chatStreamStartedAt\?\?=Date\.now\(\),e\.uClawRestoredRunSyncing=!0\);)+/g,
+      "",
+    );
+    after = after.replace(
+      /(?:pu\(e\)&&uClawRestoreLiveSession\(e,n\);)+/g,
+      "",
+    );
+    after = after.replace(
+      "return du(e,`applied`,s,{requestSessionKey:n,requestAgentId:r,previousRunId:l,messageCount:d.length,visibleMessageCount:f.length,resetStream:m}),u}catch(t){",
+      "pu(e)&&uClawRestoreLiveSession(e,n);pu(e)&&!e.chatRunId&&e.chatStream===null&&(e.chatStream=``,e.chatStreamStartedAt??=Date.now(),e.uClawRestoredRunSyncing=!0);return du(e,`applied`,s,{requestSessionKey:n,requestAgentId:r,previousRunId:l,messageCount:d.length,visibleMessageCount:f.length,resetStream:m}),u}catch(t){",
+    );
+
+    const liveSessionChecks = [
+      "function uClawSaveLiveSession(",
+      "function uClawRestoreLiveSession(",
+      "uClawSaveLiveSession(e,n)",
+      "let r=uClawRestoreLiveSession(e,t)",
+      "chatLiveBySession:new Map",
+      "__uclawChatLiveBySession",
+      "function uClawRememberBackgroundDelta(",
+      "function uClawRememberBackgroundStreamItem(",
+      "uClawForgetLiveSession(e,t.sessionKey)",
+      "pu(e)&&uClawRestoreLiveSession(e,n)",
+      "正在同步进度",
+      "uClawRestoredRunSyncing",
+      "pu(e)&&!e.chatRunId&&e.chatStream===null",
+    ];
+    const missingLiveSessionChecks = liveSessionChecks.filter((needle) => !after.includes(needle));
+    if (missingLiveSessionChecks.length > 0) {
+      throw new Error(`Could not patch chat live session restore in ${file}: ${missingLiveSessionChecks.join(", ")}`);
+    }
+
     const draftAttachmentChecks = [
       "function UcSerializeDraftAttachments(",
       "attachments:a.attachments??[]",
@@ -873,7 +1152,7 @@ function patchChatPage() {
       '            </button>',
       '          </openclaw-tooltip>',
       '        `}',
-      '    ${e.canAbort?s`',
+      '    ${!t&&e.canAbort?s`',
       '          <openclaw-tooltip .content=${A(`chat.runControls.stop`)}>',
       '            <button',
       '              class="chat-send-btn uclaw-chat-action-btn uclaw-chat-action-btn--stop"',
@@ -887,9 +1166,10 @@ function patchChatPage() {
       '        `:c}',
       '  `}',
     ].join("");
-    if (!after.includes("uclaw-chat-action-btn--send")) {
+    const composerActionsPattern = /function wy\(e\)\{[\s\S]*?\}(function (?:uClawInputDebugEnabled|Ty)\()/;
+    if (composerActionsPattern.test(after)) {
       after = after.replace(
-        /function wy\(e\)\{[\s\S]*?\}(function (?:uClawInputDebugEnabled|Ty)\()/,
+        composerActionsPattern,
         `${composerActionsFunction}$1`,
       );
     }
@@ -899,6 +1179,7 @@ function patchChatPage() {
       "uclaw-chat-action-btn--stop",
       "?disabled=${!e.connected||e.sending||!t}",
       "e.canAbort||e.isBusy?A(`chat.runControls.queue`)",
+      "!t&&e.canAbort?s`",
       "function wy(e)",
     ];
     const missingComposerActionChecks = composerActionChecks.filter((needle) => !after.includes(needle));
@@ -1068,6 +1349,69 @@ function patchControlCss() {
     "/* uclaw-composer-neutral-focus-1 */",
     ".agent-chat__composer-shell .agent-chat__input:focus-within{border-color:#d0d7e2!important;outline:none!important;box-shadow:0 10px 28px rgba(16,22,43,.08)!important}",
   ].join("");
+  const turnExecutionGroupingCss = [
+    "/* uclaw-turn-execution-grouping-17 */",
+    ".chat-group>.chat-avatar{align-self:flex-start!important;margin-top:2px;margin-bottom:0!important}",
+    ".chat-group--assistant-turn .chat-group-messages{max-width:var(--chat-message-max-width,min(900px,68%))}",
+    ".chat-group--assistant-turn .chat-activity-group--turn{width:100%;margin-bottom:6px}",
+    ".chat-group--assistant-turn .chat-activity-group__process{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid color-mix(in srgb,var(--border,#d9d9d4) 72%,transparent)}",
+    ".chat-group--assistant-turn .chat-activity-group__body{margin-left:0!important;padding:8px 12px 10px 14px!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body>.chat-bubble--tool-shell{margin:0!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-bubble{max-width:100%!important;margin:0!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-bubble--tool-shell{padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tools-inline{display:flex!important;flex-direction:column!important;gap:3px!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-collapse{border-radius:6px!important;margin:0!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-summary{min-height:28px!important;padding:5px 8px!important;gap:6px!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-summary__label{display:none!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-summary__names{font-weight:600;color:var(--text)!important}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-summary__preview{max-width:min(42vw,420px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-body{padding:6px 8px 8px 18px!important}",
+    ".chat-activity-group__process .chat-bubble{max-width:100%!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--muted)!important}",
+    ".chat-activity-group__process .markdown-body{font-size:13px;line-height:1.5;color:var(--muted)!important}",
+    ".chat-activity-group__process .chat-reading-indicator.uclaw-chat-reading-status{min-height:22px;padding:0!important}",
+    ".chat-group:has(+ .chat-group.tool){margin-bottom:2px}",
+    ".chat-group.tool{margin-top:-8px;margin-bottom:4px}",
+    ".chat-group.assistant:has(+ .chat-group.tool) + .chat-group.tool>.chat-avatar{visibility:hidden!important}",
+    ".chat-group.tool>.chat-group-messages>.chat-group-footer{display:none!important}",
+    ".chat-group.tool .chat-group-messages{max-width:min(780px,72%)!important}",
+    ".chat-group.tool .chat-bubble--tool-shell{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;max-width:100%!important}",
+    ".chat-group.tool .chat-tools-inline{width:100%;gap:4px}",
+    ".chat-tool-msg-collapse,.chat-activity-group{border:1px solid color-mix(in srgb,var(--border,#d9d9d4) 82%,transparent);border-radius:8px;background:color-mix(in srgb,var(--bg-elevated,#fff) 78%,var(--bg-muted,#f3f4f6) 22%);overflow:hidden}",
+    ".chat-tool-msg-summary,.chat-activity-group__summary{min-height:34px;padding:6px 10px!important;color:var(--muted)!important;background:transparent!important}",
+    ".chat-tool-msg-summary:hover,.chat-tool-msg-summary:focus-visible,.chat-activity-group__summary:hover,.chat-activity-group__summary:focus-visible{background:color-mix(in srgb,var(--bg-hover,#eef2f7) 52%,transparent)!important;color:var(--text)!important}",
+    ".chat-tool-msg-summary__label,.chat-activity-group__label{color:var(--text)!important;font-weight:600}",
+    ".chat-activity-group__summary.is-running{background:color-mix(in srgb,var(--accent,#2563eb) 8%,transparent)!important}",
+    ".chat-activity-group__summary.is-running .chat-activity-group__label{color:var(--accent,#2563eb)!important}",
+    ".chat-activity-group__summary.is-running .chat-activity-group__icon{color:var(--accent,#2563eb)!important;animation:pulse-subtle 1.1s ease-in-out infinite}",
+    ".chat-activity-group__spinner{width:14px;height:14px;border:2px solid color-mix(in srgb,var(--accent,#2563eb) 24%,transparent);border-top-color:var(--accent,#2563eb);border-radius:50%;flex:0 0 auto;animation:uclaw-activity-spin .7s linear infinite}",
+    "@keyframes uclaw-activity-spin{to{transform:rotate(360deg)}}",
+    ".chat-activity-group__summary.is-done .chat-activity-group__icon{color:var(--ok,#22c55e)!important}",
+    ".chat-activity-group__summary.is-warning .chat-activity-group__icon{color:var(--warn,#b7791f)!important}",
+    ".chat-activity-group__state{color:var(--muted)!important;font-size:12px;font-weight:500;margin-left:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".chat-tool-msg-summary__names,.chat-tool-msg-summary__preview{color:var(--muted)!important}",
+    ".chat-tool-msg-summary--error,.chat-activity-group__summary--error{border-left:3px solid var(--warn,#f59e0b);color:var(--muted)!important}",
+    ".chat-tool-msg-summary--error .chat-tool-msg-summary__icon,.chat-tool-msg-summary--error .chat-tool-msg-summary__label,.chat-activity-group__summary--error .chat-activity-group__icon,.chat-activity-group__summary--error .chat-activity-group__label{color:var(--warn,#b7791f)!important}",
+    ".chat-tool-msg-body,.chat-activity-group__body{padding:8px 12px 10px 28px!important;border-top:1px solid color-mix(in srgb,var(--border,#d9d9d4) 72%,transparent);background:color-mix(in srgb,var(--bg,#fff) 60%,transparent)}",
+    ".chat-group:not(.chat-group--assistant-turn):has(.chat-reading-indicator.uclaw-chat-reading-status) .chat-group-messages{width:100%;max-width:var(--chat-message-max-width,min(900px,68%))}",
+    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status{width:100%;max-width:100%;box-sizing:border-box;min-height:34px;padding:6px 10px!important;border:1px solid color-mix(in srgb,var(--border,#d9d9d4) 82%,transparent);border-radius:8px;background:color-mix(in srgb,var(--accent,#2563eb) 8%,var(--bg-elevated,#fff));box-shadow:none!important}",
+    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .chat-reading-indicator__dots{width:14px;height:14px;border:2px solid color-mix(in srgb,var(--accent,#2563eb) 24%,transparent);border-top-color:var(--accent,#2563eb);border-radius:50%;animation:uclaw-activity-spin .7s linear infinite}",
+    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .chat-reading-indicator__dots span{display:none!important}",
+    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .uclaw-chat-reading-status__label{color:var(--accent,#2563eb)!important;font-weight:600}",
+    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .uclaw-chat-reading-status__label::after{content:' · 执行过程'}",
+    ".chat-tool-card__block-content{max-height:min(360px,46vh)}",
+    ".chat-group.tool + .chat-group.assistant{margin-top:0}",
+    ".chat-group.tool + .chat-group.assistant>.chat-avatar{visibility:hidden!important}",
+    ".chat-group.tool + .chat-group.assistant .chat-group-messages{max-width:var(--chat-message-max-width,min(900px,68%))}",
+    ".chat-group.tool + .chat-group.assistant .chat-bubble:first-child{margin-top:0}",
+    ".chat-group.tool + .chat-group.assistant .chat-group-footer{margin-top:4px;color:var(--muted)}",
+    "@media (width<=720px){.chat-group.tool .chat-group-messages{max-width:calc(100% - 24px)!important}}",
+  ].join("");
+  const readingStatusCss = [
+    "/* uclaw-chat-reading-status-1 */",
+    ".chat-reading-indicator.uclaw-chat-reading-status{display:inline-flex!important;align-items:center;gap:8px;min-height:34px;padding:8px 12px!important;color:var(--muted)!important}",
+    ".chat-reading-indicator.uclaw-chat-reading-status .chat-reading-indicator__dots{display:inline-flex;align-items:center;gap:3px}",
+    ".uclaw-chat-reading-status__label{color:var(--muted);font-size:13px;font-weight:500;line-height:1.35;white-space:nowrap}",
+  ].join("");
 
   for (const file of files) {
     const before = read(file);
@@ -1093,6 +1437,28 @@ function patchControlCss() {
     }
     if (!after.includes("uclaw-composer-neutral-focus-1")) {
       after = `${after}\n${composerNeutralFocusCss}\n`;
+    }
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-1 \*\/\.chat-group\.tool\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool\{margin-left:16px\}\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-2 \*\/\.chat-group:has\(\+ \.chat-group\.tool\)\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool\{margin-left:50px\}\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-3 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool\{margin-left:50px\}\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-4 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-5 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-6 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-7 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-8 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-9 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-10 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-11 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-12 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-13 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-14 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-15 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-16 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    if (!after.includes("uclaw-turn-execution-grouping-17")) {
+      after = `${after}\n${turnExecutionGroupingCss}\n`;
+    }
+    if (!after.includes("uclaw-chat-reading-status-1")) {
+      after = `${after}\n${readingStatusCss}\n`;
     }
     after = after.replace(
       new RegExp(`(${escapeRegExp(attachmentCss)})\\n{3,}`),
@@ -2280,9 +2646,11 @@ function patchServiceWorker() {
   }
 
   let source = read(swPath);
+  source = source.replace(/new-session-top-1/g, "new-session-row-1");
+  source = source.replace(/new-session-row-1/g, "new-session-row-2");
   source = source.replace(
     /const EMBEDDED_CACHE_VERSION = "[^"]+";/,
-    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-4-fixed-light-footer-1-new-session-top-1-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1-ecommerce-count-nowrap-1-ecommerce-small-screen-layout-1-ecommerce-record-align-1-ecommerce-record-chip-center-1-ecommerce-prompt-pack-rehydrate-actions-1-ecommerce-start-cta-1-ecommerce-image-task-record-1";',
+    'const EMBEDDED_CACHE_VERSION = "2026.7.1-2-0790d9f593ad-uclaw-media-filter-2-skillhub-branding-1-bundled-filter-1-ui-polish-7-ui-polish-8-ui-polish-9-ui-polish-10-ui-polish-11-ui-polish-12-ui-polish-13-ui-polish-14-ui-polish-15-chat-skillhub-dropdown-1-visible-shell-branding-1-chat-command-i18n-1-config-overview-i18n-1-chat-index-channels-i18n-1-i18n-login-channels-1-secondary-pages-i18n-1-tertiary-pages-i18n-1-visible-tertiary-i18n-1-deep-agents-chat-i18n-1-responsive-polish-1-skillhub-store-discovery-6-brand-visual-system-4-workspace-background-1-final-ui-polish-8-skillhub-risk-copy-1-skillhub-dense-ui-6-skillhub-field-map-1-skillhub-proxy-fallback-1-chat-composer-controls-polish-3-skillhub-scene-i18n-1-skillhub-scene-filter-1-media-preview-roots-1-skillhub-uninstall-1-skillhub-detail-fallback-2-skill-store-copy-1-skillhub-installed-memory-2-skillhub-list-scroll-1-skillhub-list-flex-1-skillhub-viewport-fix-1-skillhub-page-scroll-reset-1-skillhub-category-registry-1-skillhub-scene-picker-2-skillhub-page-header-safe-1-skillhub-compact-header-wrap-1-skillhub-active-scene-count-1-primary-nav-ia-2-expert-landing-1-expert-create-1-expert-management-1-expert-custom-form-1-expert-session-label-1-expert-create-center-2-expert-create-modal-1-expert-main-session-2-expert-visual-density-1-expert-modal-layout-1-expert-directory-1-expert-directory-scroll-1-expert-directory-responsive-1-expert-directory-bottom-padding-1-expert-category-compact-1-expert-category-filter-1-expert-category-whitespace-1-expert-templates-108-1-session-rename-1-ecommerce-workflow-1-ecommerce-carousel-export-1-ecommerce-type-card-polish-1-ecommerce-count-compact-1-ecommerce-design-layout-4-fixed-light-footer-1-new-session-row-2-deep-thinking-control-1-chat-workspace-rail-hidden-1-chat-composer-surface-1-chat-composer-attachment-float-1-sidebar-command-shelf-3-ecommerce-draft-cache-1-ecommerce-stale-records-1-ecommerce-count-nowrap-1-ecommerce-small-screen-layout-1-ecommerce-record-align-1-ecommerce-record-chip-center-1-ecommerce-prompt-pack-rehydrate-actions-1-ecommerce-start-cta-1-ecommerce-image-task-record-1";',
   );
   source = source.replace(
     /skillhub-scene-picker-2(?!-skillhub-scene-font-color-1)/,
@@ -2334,9 +2702,14 @@ function patchServiceWorker() {
     /sidebar-new-session-width-1(?!-chat-status-poll-1)/,
     "sidebar-new-session-width-1-chat-status-poll-1",
   );
+  source = source.replace(/sidebar-new-session-active-run-1/g, "sidebar-new-session-active-run-2");
   source = source.replace(
-    /chat-status-poll-1(?:-global-font-scale-\d+)?(?!-global-font-scale-2)/,
-    "chat-status-poll-1-global-font-scale-2",
+    /chat-status-poll-1(?!-sidebar-new-session-active-run-2)/,
+    "chat-status-poll-1-sidebar-new-session-active-run-2",
+  );
+  source = source.replace(
+    /sidebar-new-session-active-run-2(?:-global-font-scale-\d+)?(?!-global-font-scale-2)/,
+    "sidebar-new-session-active-run-2-global-font-scale-2",
   );
   source = source.replace(
     /global-font-scale-2(?!-session-reconcile-missing-runids-1)/,
@@ -2353,6 +2726,19 @@ function patchServiceWorker() {
   source = source.replace(
     /chat-background-session-status-1(?!-alipay-recharge-qr-1)/,
     "chat-background-session-status-1-alipay-recharge-qr-1",
+  );
+  source = source.replace(/-chat-execution-grouping-(?:[1-9]|1[0-6])/g, "");
+  source = source.replace(
+    /alipay-recharge-qr-1(?!-chat-execution-grouping-16)/,
+    "alipay-recharge-qr-1-chat-execution-grouping-16",
+  );
+  source = source.replace(
+    /chat-execution-grouping-16(?!-chat-delete-i18n-1)/,
+    "chat-execution-grouping-16-chat-delete-i18n-1",
+  );
+  source = source.replace(
+    /chat-delete-i18n-1(?!-chat-composer-single-action-1)/,
+    "chat-delete-i18n-1-chat-composer-single-action-1",
   );
   source = source.replace(
     /ecommerce-stale-records-1(?!-ecommerce-preview-select-1)/,
@@ -2726,6 +3112,35 @@ function patchIndexUiCopy() {
   for (const file of listAssetFiles(/^index-.*\.js$/, "index js")) {
     const before = read(file);
     let after = replacePairs(before, pairs);
+    after = after.replace(
+      "a=!this.connected||this.sessionsLoading||!!n.selectedSession?.hasActiveRun;return{routeSessionKey:n.currentSessionKey,selectedAgentId:n.selectedAgentId,recentSessions:i,newSessionDisabled:a,newSessionTitle:this.connected?n.selectedSession?.hasActiveRun?`Finish the active run before creating a new session`:`New session`:`Connect to create a new session`}",
+      "a=!this.connected||this.sessionsLoading;return{routeSessionKey:n.currentSessionKey,selectedAgentId:n.selectedAgentId,selectedSession:n.selectedSession,recentSessions:i,newSessionDisabled:a,newSessionTitle:this.connected?`New session`:`Connect to create a new session`}",
+    );
+    after = after.replace(
+      "a=!this.connected||this.sessionsLoading;return{routeSessionKey:n.currentSessionKey,selectedAgentId:n.selectedAgentId,recentSessions:i,newSessionDisabled:a,newSessionTitle:this.connected?`New session`:`Connect to create a new session`}",
+      "a=!this.connected||this.sessionsLoading;return{routeSessionKey:n.currentSessionKey,selectedAgentId:n.selectedAgentId,selectedSession:n.selectedSession,recentSessions:i,newSessionDisabled:a,newSessionTitle:this.connected?`New session`:`Connect to create a new session`}",
+    );
+    after = after.replace(
+      "this.createSession=async(e=!1)=>{let t=this.context;if(!t)return;let{routeSessionKey:n,selectedAgentId:r,newSessionDisabled:i}=this.getSessionNavigationState();if(i)return;let a=await t.sessions.create({currentSessionKey:n,agentId:r,...e?{worktree:!0}:{}});a&&this.selectSession(a)}",
+      "this.createSession=async(e=!1)=>{let t=this.context;if(!t)return;let{routeSessionKey:n,selectedAgentId:r,newSessionDisabled:i,selectedSession:o}=this.getSessionNavigationState();if(i)return;let s=!!(o&&xn(o)),a=await t.sessions.create({...s?{}:{currentSessionKey:n},agentId:r,...e?{worktree:!0}:{}});a&&this.selectSession(a)}",
+    );
+    const newSessionActionMethod =
+      "renderNewSessionAction(){let e=this.context,{selectedAgentId:t,newSessionDisabled:n,newSessionTitle:r}=this.getSessionNavigationState(),i=e?.agents.state.agentsList?.agents.find(e=>j(e.id)===j(t))?.workspaceGit===!0,a=c`<button type=\"button\" class=\"sidebar-new-session\" aria-label=${D(`chat.runControls.newSession`)} ?disabled=${n} @click=${()=>void this.createSession()}><span class=\"sidebar-new-session__icon\" aria-hidden=\"true\">${M.plus}</span>${this.collapsed?l:c`<span class=\"sidebar-new-session__label\">${D(`chat.runControls.newSession`)}</span>`}</button>`,o=i?c`<div class=\"sidebar-new-session-group\">${a}<button type=\"button\" class=\"sidebar-new-session sidebar-new-session--worktree\" title=${D(`chat.runControls.newSessionWorktree`)} aria-label=${D(`chat.runControls.newSessionWorktree`)} ?disabled=${n} @click=${()=>void this.createSession(!0)}><span class=\"sidebar-new-session__icon\" aria-hidden=\"true\">${M.gitBranch}</span></button></div>`:a;return this.collapsed?c`<openclaw-tooltip .content=${r}>${o}</openclaw-tooltip>`:c`<div class=\"sidebar-new-session-slot\">${o}</div>`}";
+    if (!after.includes("renderNewSessionAction(){")) {
+      after = after.replace("renderSessions(){let e=this.context,", `${newSessionActionMethod}renderSessions(){let e=this.context,`);
+    }
+    after = after.replace(
+      '${this.renderSearch()}\n          <openclaw-tooltip .content=${t}>',
+      '${this.renderSearch()}\n          ${this.collapsed?this.renderNewSessionAction():l}\n          <openclaw-tooltip .content=${t}>',
+    );
+    after = after.replace(
+      '<div class="sidebar-shell__body">\n            <nav class="sidebar-nav"',
+      '<div class="sidebar-shell__body">\n            ${this.collapsed?l:this.renderNewSessionAction()}\n            <nav class="sidebar-nav"',
+    );
+    after = after.replace(
+      '        ${this.collapsed?c`<openclaw-tooltip .content=${a}\n              >${u}</openclaw-tooltip\n            >`:u}\n        ${this.collapsed?l:c`',
+      '        ${this.collapsed?l:c`',
+    );
     const sessionRenameDialogHelper =
       "function UcEnsureSessionRenameDialogStyle(){if(document.getElementById(`uclaw-session-rename-style`))return;let e=document.createElement(`style`);e.id=`uclaw-session-rename-style`;e.textContent=`.uclaw-session-rename{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.28);display:flex;align-items:center;justify-content:center;padding:24px}.uclaw-session-rename__panel{width:min(420px,calc(100vw - 48px));border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#fff;box-shadow:0 24px 80px rgba(15,23,42,.22);padding:18px}.uclaw-session-rename__title{font:600 16px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;margin-bottom:12px}.uclaw-session-rename__input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#111827;outline:none}.uclaw-session-rename__input:focus{border-color:#1677ff;box-shadow:0 0 0 3px rgba(22,119,255,.16)}.uclaw-session-rename__actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.uclaw-session-rename__button{border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1f2937;padding:8px 14px;font:600 13px/1 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}.uclaw-session-rename__button--primary{border-color:#1677ff;background:#1677ff;color:#fff}`;document.head.appendChild(e)}function UcPromptSessionName(e,t){return new Promise(n=>{if(typeof document===`undefined`){n(typeof window!==`undefined`?window.prompt(e,t):null);return}UcEnsureSessionRenameDialogStyle();let r=!1,i=()=>{r||(r=!0,document.removeEventListener(`keydown`,u,!0),a.remove())},o=e=>{i(),n(e)},a=document.createElement(`div`);a.className=`uclaw-session-rename`,a.setAttribute(`role`,`dialog`),a.setAttribute(`aria-modal`,`true`);let s=document.createElement(`div`);s.className=`uclaw-session-rename__panel`;let c=document.createElement(`div`);c.className=`uclaw-session-rename__title`,c.textContent=e||`重命名会话`;let l=document.createElement(`input`);l.className=`uclaw-session-rename__input`,l.type=`text`,l.value=typeof t===`string`?t:``,l.maxLength=120,l.setAttribute(`aria-label`,c.textContent);let d=document.createElement(`div`);d.className=`uclaw-session-rename__actions`;let h=document.createElement(`button`);h.type=`button`,h.className=`uclaw-session-rename__button`,h.textContent=`取消`;let m=document.createElement(`button`);m.type=`button`,m.className=`uclaw-session-rename__button uclaw-session-rename__button--primary`,m.textContent=`保存`,h.addEventListener(`click`,()=>o(null)),m.addEventListener(`click`,()=>o(l.value)),a.addEventListener(`click`,e=>{e.target===a&&o(null)});let u=e=>{if(e.key===`Escape`){e.preventDefault(),o(null);return}if(e.key===`Tab`){let t=[l,h,m],n=t.indexOf(document.activeElement);n<0&&(n=0),e.preventDefault(),t[(n+(e.shiftKey?-1:1)+t.length)%t.length].focus({preventScroll:!0});return}if(e.key===`Enter`){if(e.isComposing||e.keyCode===229)return;e.preventDefault(),o(l.value)}};document.addEventListener(`keydown`,u,!0),d.append(h,m),s.append(c,l,d),a.append(s),document.body.appendChild(a);let f=()=>{l.focus({preventScroll:!0}),l.select()};requestAnimationFrame(f),setTimeout(f,80)})}";
     const sidebarSessionNameHelper =
@@ -5722,6 +6137,12 @@ function patchChatUiCopy() {
     ["New messages", "新消息"],
     ["Remove queued message", "移除排队消息"],
     ["Cancel reply", "取消回复"],
+    ['content="Delete"', 'content="删除"'],
+    ['aria-label="Delete message"', 'aria-label="删除消息"'],
+    ["Delete this message?", "删除这条消息？"],
+    ["Don't ask again", "不再询问"],
+    [">Cancel</button>", ">取消</button>"],
+    [">Delete</button>", ">删除</button>"],
     ["Not saved to chat history", "未保存到会话历史"],
     ["Replying to", "正在回复"],
     ["BTW side result", "临时结果"],
@@ -7159,15 +7580,10 @@ openclaw-skills-page .skillhub-scene-icon svg {
 }
 
 .sidebar-shell{position:relative}
-.sidebar-shell__body{padding-top:36px}
-.sidebar--collapsed .sidebar-shell__body{padding-top:50px}
-.sidebar-sessions>.sidebar-new-session,
-.sidebar-sessions>openclaw-tooltip>.sidebar-new-session,
-.sidebar-sessions>.sidebar-new-session-group{position:absolute;top:62px;left:16px;right:16px;z-index:12;margin:0}
-.sidebar-sessions>openclaw-tooltip{display:contents}
-.sidebar--collapsed .sidebar-sessions>.sidebar-new-session,
-.sidebar--collapsed .sidebar-sessions>openclaw-tooltip>.sidebar-new-session,
-.sidebar--collapsed .sidebar-sessions>.sidebar-new-session-group{top:62px;left:14px;right:14px}
+.sidebar-shell__body{padding-top:0}
+.sidebar-new-session-slot{flex:none;padding:0 6px 8px}
+.sidebar-new-session-slot>openclaw-tooltip,
+.sidebar-brand__actions>openclaw-tooltip{display:contents}
 
 /* sidebar-command-shelf-3 */
 .shell-nav {
@@ -7224,7 +7640,7 @@ openclaw-skills-page .skillhub-scene-icon svg {
 }
 
 .sidebar-nav {
-  padding: 12px 0 6px;
+  padding: 0 0 6px;
 }
 
 .nav-section {
@@ -7296,44 +7712,42 @@ openclaw-skills-page .skillhub-scene-icon svg {
   padding: 0 6px;
 }
 
-.sidebar-sessions>.sidebar-new-session,
-.sidebar-sessions>openclaw-tooltip>.sidebar-new-session {
-  left: 20px;
-  right: 72px;
-  width: auto;
+.sidebar-new-session-slot>.sidebar-new-session,
+.sidebar-new-session-slot>openclaw-tooltip>.sidebar-new-session {
+  width: 100%;
 }
 
-.sidebar-sessions>.sidebar-new-session-group {
-  left: 20px;
-  right: 20px;
+.sidebar-new-session-slot>.sidebar-new-session-group,
+.sidebar-new-session-slot>openclaw-tooltip>.sidebar-new-session-group {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 46px;
+  grid-template-columns: minmax(0, 1fr) 44px;
   gap: 8px;
   align-items: center;
-  width: auto;
+  width: 100%;
 }
 
 .sidebar-new-session {
-  min-height: 46px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  min-height: 44px;
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
+  background: transparent;
   box-shadow: none;
   gap: 10px;
-  padding: 0 13px;
+  padding: 0 4px;
   font-size: 15px;
-  font-weight: 680;
+  font-weight: 650;
+  color: #717b8d;
 }
 
 .sidebar-new-session:hover:not(:disabled) {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent-subtle) 28%, white 72%);
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  color: var(--uclaw-navy);
+  background: rgba(255, 255, 255, 0.58);
+  border-color: transparent;
 }
 
 .sidebar-new-session--worktree {
-  width: 46px;
-  min-height: 46px;
+  width: 44px;
+  min-height: 44px;
   justify-content: center;
   padding: 0;
   color: #8792a4;
@@ -7344,6 +7758,45 @@ openclaw-skills-page .skillhub-scene-icon svg {
 .sidebar-new-session__icon svg {
   width: 19px;
   height: 19px;
+}
+
+.sidebar--collapsed .sidebar-new-session-slot {
+  display: none;
+}
+
+.sidebar--collapsed .sidebar-brand__actions {
+  gap: 8px;
+}
+
+.sidebar--collapsed .sidebar-brand__actions .sidebar-new-session,
+.sidebar--collapsed .sidebar-new-session {
+  width: 30px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  justify-content: center;
+}
+
+.sidebar--collapsed .sidebar-brand__actions .sidebar-new-session:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-subtle) 42%, white 58%);
+}
+
+.sidebar--collapsed .sidebar-brand__actions .sidebar-new-session-group {
+  display: contents;
+}
+
+.sidebar--collapsed .sidebar-new-session--worktree {
+  display: none;
+}
+
+.sidebar--collapsed .sidebar-new-session__icon,
+.sidebar--collapsed .sidebar-new-session__icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-recent-sessions {

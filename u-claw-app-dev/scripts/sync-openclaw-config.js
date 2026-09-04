@@ -7,7 +7,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const templatePath = path.join(repoRoot, 'resources', 'default-openclaw.json');
 const openclawPackagePath = path.join(repoRoot, 'node_modules', 'openclaw', 'package.json');
 const appSupportPath = path.join(os.homedir(), 'Library', 'Application Support');
-const appDataNames = ['u-claw', 'Bavi-box'];
+const appDataNames = ['u-claw-dev', 'u-claw', 'Bavi-box'];
 const desktopConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, '.openclaw', 'openclaw.json'));
 const portableCacheConfigPaths = appDataNames.map(name => path.join(appSupportPath, name, 'usb-portable', 'data', '.openclaw', 'openclaw.json'));
 const DEFAULT_NEW_API_BASE_URL = 'https://api.yiyong.me/v1';
@@ -27,9 +27,9 @@ function usage() {
 
 Options:
   --source <path>        Read existing key from another openclaw.json.
-  --new-api-key <key>    Override New API key for custom/litellm.
-  --video-base-url <url> Override xai video base URL. Defaults to Bavi-box cloud.
-  --video-api-key <key>  Override xai video adapter token.
+  --new-api-key <key>    Override New API key for custom/litellm/xai.
+  --video-base-url <url> Optional xai video base URL override. Defaults to New API base URL.
+  --video-api-key <key>  Optional xai video key override. Defaults to New API key.
   --customer            Generate a clean customer config with empty New API keys.
   --streamer            Require a real New API key inherited from desktop config.
   --desktop             Write desktop config only. Writes both u-claw and Bavi-box app data dirs.
@@ -50,7 +50,7 @@ function parseArgs(argv) {
     usbRoots: [],
     newApiKey: process.env.UCLAW_NEW_API_KEY || '',
     newApiBaseUrl: process.env.UCLAW_NEW_API_BASE_URL || DEFAULT_NEW_API_BASE_URL,
-    videoBaseUrl: process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || DEFAULT_VIDEO_ADAPTER_BASE_URL,
+    videoBaseUrl: process.env.UCLAW_VIDEO_ADAPTER_BASE_URL || '',
     videoApiKey: process.env.UCLAW_VIDEO_ADAPTER_API_KEY || ''
   };
 
@@ -70,6 +70,10 @@ function parseArgs(argv) {
       options.newApiKey = readValue();
     } else if (arg === '--new-api-base-url') {
       options.newApiBaseUrl = readValue();
+    } else if (arg === '--video-base-url') {
+      options.videoBaseUrl = readValue();
+    } else if (arg === '--video-api-key') {
+      options.videoApiKey = readValue();
     } else if (arg === '--customer') {
       options.customer = true;
     } else if (arg === '--streamer') {
@@ -89,6 +93,10 @@ function parseArgs(argv) {
 
   if (process.env.UCLAW_USB_ROOT) {
     options.usbRoots.push(process.env.UCLAW_USB_ROOT);
+  }
+
+  if (!options.videoBaseUrl) {
+    options.videoBaseUrl = options.newApiBaseUrl || DEFAULT_VIDEO_ADAPTER_BASE_URL;
   }
 
   const hasExplicitTarget = options.desktop || options.portableCache || options.usbRoots.length || options.destinations.length;
