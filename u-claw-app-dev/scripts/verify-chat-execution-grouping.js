@@ -31,7 +31,7 @@ const patchSource = read(patchFile);
 const swSource = read(swFile);
 
 const checks = [
-  [chatSource, "执行过程", "multi-tool activity is renamed to execution trace"],
+  [chatSource, "ariaLabel:\"已完成 · 执行过程 · \"+(n.length||1)+\" 步\"", "execution trace keeps an accessible label without visible process copy"],
   [chatSource, "hi(`assistant`,{name:r,avatar:t.assistantAvatar??null}", "tool activity uses the assistant avatar"],
   [chatSource, "部分步骤未完成", "tool failures are softened in the summary"],
   [chatSource, "步骤未完成", "expanded failed step label is localized"],
@@ -47,6 +47,7 @@ const checks = [
   [chatSource, "uclaw-execution:plain:", "normal no-tool chat also shows a consistent execution process header"],
   [chatSource, "q=e=>!uClawIsAssistantPendingRenderItem(e)", "pure loading bubbles are filtered from execution process contents"],
   [chatSource, "v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0", "empty execution traces do not render a blank body"],
+  [chatSource, "<span class=\"chat-activity-group__label\">${u.label}</span>", "assistant execution header hides process wording"],
   [chatSource, "o.processContents=[...a.filter(q),...m.filter(q)]", "execution process hides duplicated inner loading rows"],
   [chatSource, "l.every(e=>e.outputText!==void 0||e.isError===!0)", "completed non-image tool-only turns do not remain stuck as running"],
   [chatSource, "u&&!d&&!h", "image tool output does not complete the turn before final media output"],
@@ -66,7 +67,7 @@ const checks = [
   [chatSource, "正在调用 ${u.detail.slice(3)}", "running execution header falls back to current tool name"],
   [chatSource, "u.detail.startsWith(`正在`)?u.detail:null", "running execution header can show waiting media result"],
   [chatSource, "u.running||l?`running`:`done`", "running and completed execution traces use separate expansion keys"],
-  [chatSource, "f=u.running||l?b!==!1:b===!0", "running trace defaults open while completed trace defaults closed"],
+  [chatSource, "f=v&&(u.running||l?b!==!1:b===!0)", "execution traces only expand when there are steps to show"],
   [chatSource, "Math.max(a.length", "assistant turn counts process-only running steps"],
   [chatSource, "chat-activity-group__spinner", "running execution trace has a visible spinner"],
   [chatSource, "图片结果已返回", "collapsed image trace explains returned output"],
@@ -105,9 +106,14 @@ const checks = [
   [chatSource, ">取消</button>", "delete confirmation cancel action is localized"],
   [chatSource, ">删除</button>", "delete confirmation destructive action is localized"],
   [chatSource, "!t&&e.canAbort?s`", "composer stop button only renders when the draft is empty"],
-  [cssSource, "uclaw-turn-execution-grouping-17", "runtime stylesheet has execution grouping marker"],
+  [cssSource, "uclaw-turn-execution-grouping-19", "runtime stylesheet has execution grouping marker"],
   [cssSource, "uclaw-chat-reading-status-1", "runtime stylesheet has semantic loading marker"],
   [cssSource, ".chat-group--assistant-turn .chat-activity-group--turn", "execution trace renders inside the assistant turn"],
+  [cssSource, ".chat-group--assistant-turn .chat-activity-group--turn{width:fit-content;max-width:100%;margin-bottom:6px}", "collapsed execution trace width follows its label"],
+  [cssSource, ".chat-group--assistant-turn .chat-activity-group--turn.is-open{width:100%}", "expanded execution trace still gives details full width"],
+  [cssSource, ".chat-group--assistant-turn button.chat-activity-group__summary:not(:has(.collapse-chevron)){cursor:default}", "empty execution trace is not presented as expandable"],
+  [cssSource, ".chat-group--assistant-turn button.chat-activity-group__summary:not(:has(.collapse-chevron)):hover", "empty execution trace does not look expandable on hover"],
+  [cssSource, ".chat-group--assistant-turn .chat-activity-group__summary .collapse-chevron--collapsed{transform:rotate(-90deg)}", "expandable execution traces show collapsed arrow state"],
   [cssSource, ".chat-group--assistant-turn .chat-activity-group__process", "pre-tool process content stays collapsed"],
   [cssSource, ".chat-group--assistant-turn .chat-activity-group__body{margin-left:0!important;padding:8px 12px 10px 14px!important}", "assistant turn execution body uses compact left padding"],
   [cssSource, ".chat-group--assistant-turn .chat-activity-group__body>.chat-bubble--tool-shell{margin:0!important}", "assistant turn nested tool shell keeps panel structure without extra margin"],
@@ -116,7 +122,6 @@ const checks = [
   [cssSource, ".chat-group--assistant-turn .chat-activity-group__body .chat-tool-msg-summary__label{display:none!important}", "nested tool rows suppress duplicated status labels"],
   [cssSource, ".chat-group:not(.chat-group--assistant-turn):has(.chat-reading-indicator.uclaw-chat-reading-status) .chat-group-messages{width:100%;max-width:var(--chat-message-max-width,min(900px,68%))}", "standalone loading indicator uses execution header width"],
   [cssSource, ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status", "standalone loading indicator is styled as an execution header"],
-  [cssSource, ".uclaw-chat-reading-status__label::after{content:' · 执行过程'}", "standalone loading indicator still shows execution process text"],
   [cssSource, ".chat-activity-group__process .chat-bubble", "process text is rendered without nested bubble chrome"],
   [cssSource, ".chat-activity-group__spinner", "running execution summary shows spinner"],
   [cssSource, "@keyframes uclaw-activity-spin", "running execution spinner animates"],
@@ -126,10 +131,10 @@ const checks = [
   [cssSource, ".chat-group>.chat-avatar{align-self:flex-start!important", "avatars align with the first message line"],
   [cssSource, ".chat-group.assistant:has(+ .chat-group.tool) + .chat-group.tool>.chat-avatar{visibility:hidden!important}", "tool avatar is hidden only after an assistant avatar is already visible"],
   [cssSource, ".chat-group.tool + .chat-group.assistant>.chat-avatar{visibility:hidden!important}", "repeated assistant avatar is suppressed after tool trace"],
-  [swSource, "chat-execution-grouping-16-chat-delete-i18n-1-chat-composer-single-action-1", "service worker cache version changes for composer single action"],
-  [patchSource, "uclaw-turn-execution-grouping-17", "patch script owns execution grouping marker"],
+  [swSource, "chat-execution-grouping-19-chat-delete-i18n-1-chat-composer-single-action-1", "service worker cache version changes for composer single action"],
+  [patchSource, "uclaw-turn-execution-grouping-19", "patch script owns execution grouping marker"],
   [patchSource, "u.running||l?`running`:`done`", "patch script separates running and completed expansion state"],
-  [patchSource, "f=u.running||l?b!==!1:b===!0", "completed assistant turns default back to collapsed execution traces"],
+  [patchSource, "f=v&&(u.running||l?b!==!1:b===!0)", "empty execution traces cannot enter expanded state"],
   [patchSource, "uclaw-chat-reading-status-1", "patch script owns semantic loading marker"],
   [patchSource, "function uClawChatReadingStatus(", "patch script owns semantic loading helper"],
   [patchSource, "function uClawChatStreamRunItems(", "patch script owns stream display merge helper"],
@@ -147,7 +152,7 @@ const checks = [
   [patchSource, "i?.pendingStatus||(u.running", "patch script promotes current semantic status into header"],
   [patchSource, "正在调用 ${u.detail.slice(3)}", "patch script falls back to current tool name in header"],
   [patchSource, "u.detail.startsWith(`正在`)?u.detail:null", "patch script can show waiting media result in header"],
-  [patchSource, "f=u.running||l?b!==!1:b===!0", "patch script opens running trace and collapses completed trace"],
+  [patchSource, "f=v&&(u.running||l?b!==!1:b===!0)", "patch script opens traces only when details exist"],
   [patchSource, "chat-activity-group__spinner", "patch script owns visible running spinner"],
   [patchSource, "kind:`assistant-turn`", "patch script owns merged assistant turn item"],
   [patchSource, "function uClawAssistantTurn(", "patch script owns merged assistant turn renderer"],
@@ -177,7 +182,7 @@ for (const [source, needle, label] of checks) {
   }
 }
 
-const markerCount = cssSource.split("uclaw-turn-execution-grouping-17").length - 1;
+const markerCount = cssSource.split("uclaw-turn-execution-grouping-19").length - 1;
 if (markerCount !== 1) {
   throw new Error(`Expected one execution grouping CSS marker, found ${markerCount}`);
 }
@@ -186,6 +191,8 @@ const hiddenStepCountNeedles = [
   "${S.label} · 执行过程 · ${i} 步",
   "${u.label} · 执行过程 · ${o} 步",
   "执行过程 · 1 步",
+  "<span class=\"chat-activity-group__label\">${u.label} · 执行过程</span>",
+  ".uclaw-chat-reading-status__label::after{content:' · 执行过程'}",
 ];
 for (const needle of hiddenStepCountNeedles) {
   if (chatSource.includes(needle) || cssSource.includes(needle)) {

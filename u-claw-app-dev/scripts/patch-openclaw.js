@@ -529,15 +529,15 @@ function patchChatPage() {
     );
     after = after.replaceAll(
       "${S.label} · 执行过程 · ${i} 步",
-      "${S.label} · 执行过程",
+      "${S.label}",
     );
     after = after.replaceAll(
       "${u.label} · 执行过程 · ${o} 步",
-      "${u.label} · 执行过程",
+      "${u.label}",
     );
     after = after.replaceAll(
       "<span class=\"chat-sender-name\">Activity</span>",
-      "<span class=\"chat-sender-name\">执行过程</span>",
+      "<span class=\"chat-sender-name\">Bavi-box</span>",
     );
     after = after.replaceAll(
       "${hi(e.role,{name:r,avatar:t.assistantAvatar??null},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}",
@@ -545,11 +545,11 @@ function patchChatPage() {
     );
     after = after.replaceAll(
       "let N=re?`Tool error`:M&&!T&&!_?M.label:`Tool output`",
-      "let N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`执行过程`",
+      "let N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`步骤输出`",
     );
     after = after.replaceAll(
       ",N=re?`Tool error`:M&&!T&&!_?M.label:`Tool output`",
-      ",N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`执行过程`",
+      ",N=re?`部分步骤未完成`:M&&!T&&!_?M.label:`步骤输出`",
     );
     after = after.replaceAll(
       "Tx({label:d?`Tool error`:`Tool output`,text:e.outputText})",
@@ -561,7 +561,7 @@ function patchChatPage() {
     );
     after = after.replaceAll(
       "Tx({label:`Tool output`,text:`视频生成中，请稍等。完成后会自动显示视频。`})",
-      "Tx({label:`执行过程`,text:`视频生成中，请稍等。完成后会自动显示视频。`})",
+      "Tx({label:`步骤输出`,text:`视频生成中，请稍等。完成后会自动显示视频。`})",
     );
     after = after.replaceAll(
       "let n=e.messages.flatMap(e=>lb(e.message,e.key)),i=n.length||e.messages.length,a=n.some(Xy)&&e.turnSucceeded!==!0,o=`activity:${e.key}`,l=t.isToolMessageExpanded?.(o)??a;return s`",
@@ -588,7 +588,7 @@ function patchChatPage() {
                 >执行过程</span
               >`,
       `<span class="chat-activity-group__label"
-                >\${S.label} · 执行过程</span
+                >\${S.label}</span
               >
               \${S.detail?s\`<span class="chat-activity-group__state">\${S.detail}</span>\`:c}`,
     );
@@ -804,11 +804,12 @@ function patchChatPage() {
       "function uClawPushCompactTurn(e,t){if(t.length===0)return;for(let n of uClawBuildAssistantTurn(t))e.push(n)}",
       "function uClawCompactChatRenderItems(e){let t=[],n=[];for(let r of e){let i=r?.kind===`divider`||r?.kind===`group`&&uClawRenderItemRole(r)===`user`;if(i){uClawPushCompactTurn(t,n),n=[],t.push(r);continue}n.push(r)}return uClawPushCompactTurn(t,n),t}",
       "function uClawRenderAssistantTurnPart(e,t){if(e?.kind===`stream-run`)return uClawChatStreamRunItems(e.parts).map(e=>e.kind===`reading-indicator`?mS(e):aC({role:`assistant`,content:[{type:`text`,text:e.text}],timestamp:e.startedAt},e.key,{isStreaming:e.isStreaming,showReasoning:!1},t.onOpenSidebar));if(e?.kind===`reading-indicator`)return mS(e);if(e?.kind===`group`&&uClawRenderItemRole(e)===`assistant`)return e.messages.map((n,r)=>aC(n.message,n.key,gS(e,n,r,t),t.onOpenSidebar));return c}",
-      "function uClawAssistantTurn(e,t={}){let n=t.assistantName??`Assistant`,r=t.assistantAvatar??null,i=e.execution,a=(i?.messages??[]).flatMap(e=>lb(e.message,e.key)),o=Math.max(a.length||(i?.messages??[]).length,i?.processContents?.length||0,1),l=a.some(Xy)&&i?.turnSucceeded!==!0,u=uClawChatActivityState(i,l,a),y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);u.running&&y&&(u={...u,label:y,detail:``,ariaLabel:`${y} · 执行过程 · ${o} 步`});let d=`activity:${i?.key??e.key}:${u.running||l?`running`:`done`}`,b=t.isToolMessageExpanded?.(d),f=u.running||l?b!==!1:b===!0,p=e.contents??[],v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0,m=p.length>0?uClawAssistantTurnTimestamp(p):e.timestamp;return s`<div class=\"chat-group assistant chat-group--assistant-turn\">${hi(`assistant`,{name:n,avatar:r},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}<div class=\"chat-group-messages\">${i?s`<div class=\"chat-activity-group chat-activity-group--turn ${f?`is-open`:``}\"><button class=\"chat-activity-group__summary ${l?`chat-activity-group__summary--error`:``} ${u.className}\" type=\"button\" aria-expanded=${String(f&&v)} aria-label=${u.ariaLabel} @click=${e=>{px(e)&&v&&t.onToggleToolMessageExpanded?.(d,f)}}>${u.running?s`<span class=\"chat-activity-group__spinner\" aria-hidden=\"true\"></span>`:s`<span class=\"chat-activity-group__icon\">${u.icon}</span>`}<span class=\"chat-activity-group__label\">${u.label} · 执行过程</span>${u.detail?s`<span class=\"chat-activity-group__state\">${u.detail}</span>`:c}${v?s`<span class=\"collapse-chevron ${f?``:`collapse-chevron--collapsed`}\" aria-hidden=\"true\">${z.chevronDown}</span>`:c}</button>${f&&v?s`<div class=\"chat-activity-group__body\">${i.processContents?.length?s`<div class=\"chat-activity-group__process\">${i.processContents.map(e=>uClawRenderAssistantTurnPart(e,t))}</div>`:c}${i.messages.map((n,r)=>aC(n.message,n.key,gS(i,n,r,t),t.onOpenSidebar))}</div>`:c}</div>`:c}${p.map(e=>uClawRenderAssistantTurnPart(e,t))}<div class=\"chat-group-footer\"><div class=\"chat-group-footer__meta\"><span class=\"chat-sender-name\">${n}</span>${zx(m)}</div>${t.onDelete?s`<div class=\"chat-group-footer-actions\">${kS(t.onDelete,`right`)}</div>`:c}</div></div></div>`}",
+      "function uClawAssistantTurn(e,t={}){let n=t.assistantName??`Assistant`,r=t.assistantAvatar??null,i=e.execution,a=(i?.messages??[]).flatMap(e=>lb(e.message,e.key)),o=Math.max(a.length||(i?.messages??[]).length,i?.processContents?.length||0,1),l=a.some(Xy)&&i?.turnSucceeded!==!0,u=uClawChatActivityState(i,l,a),y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);u.running&&y&&(u={...u,label:y,detail:``,ariaLabel:`${y} · 执行过程 · ${o} 步`});let d=`activity:${i?.key??e.key}:${u.running||l?`running`:`done`}`,b=t.isToolMessageExpanded?.(d),f=u.running||l?b!==!1:b===!0,p=e.contents??[],v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0,m=p.length>0?uClawAssistantTurnTimestamp(p):e.timestamp;return s`<div class=\"chat-group assistant chat-group--assistant-turn\">${hi(`assistant`,{name:n,avatar:r},{name:t.userName??null,avatar:t.userAvatar??null},t.basePath,t.assistantAttachmentAuthToken)}<div class=\"chat-group-messages\">${i?s`<div class=\"chat-activity-group chat-activity-group--turn ${f?`is-open`:``}\"><button class=\"chat-activity-group__summary ${l?`chat-activity-group__summary--error`:``} ${u.className}\" type=\"button\" aria-expanded=${String(f&&v)} aria-label=${u.ariaLabel} @click=${e=>{px(e)&&v&&t.onToggleToolMessageExpanded?.(d,f)}}>${u.running?s`<span class=\"chat-activity-group__spinner\" aria-hidden=\"true\"></span>`:s`<span class=\"chat-activity-group__icon\">${u.icon}</span>`}<span class=\"chat-activity-group__label\">${u.label}</span>${u.detail?s`<span class=\"chat-activity-group__state\">${u.detail}</span>`:c}${v?s`<span class=\"collapse-chevron ${f?``:`collapse-chevron--collapsed`}\" aria-hidden=\"true\">${z.chevronDown}</span>`:c}</button>${f&&v?s`<div class=\"chat-activity-group__body\">${i.processContents?.length?s`<div class=\"chat-activity-group__process\">${i.processContents.map(e=>uClawRenderAssistantTurnPart(e,t))}</div>`:c}${i.messages.map((n,r)=>aC(n.message,n.key,gS(i,n,r,t),t.onOpenSidebar))}</div>`:c}</div>`:c}${p.map(e=>uClawRenderAssistantTurnPart(e,t))}<div class=\"chat-group-footer\"><div class=\"chat-group-footer__meta\"><span class=\"chat-sender-name\">${n}</span>${zx(m)}</div>${t.onDelete?s`<div class=\"chat-group-footer-actions\">${kS(t.onDelete,`right`)}</div>`:c}</div></div></div>`}",
     ].join("");
     compactRenderItemsFunction = compactRenderItemsFunction
       .replace("let s=uClawAssistantTurnHasRunningContent(i),c=uClawAssistantTurnHasFinalContent(i),l=(o.messages??[]).flatMap(e=>lb(e.message,e.key)),u=l.length>0&&l.every(e=>e.outputText!==void 0||e.isError===!0),d=l.some(Xy),f=!s&&(o.turnSucceeded===!0||c||u&&!d),p=f?i.filter(e=>!uClawIsAssistantPendingRenderItem(e)):[],m=f?i.filter(uClawIsAssistantPendingRenderItem):i;return f&&(o.turnSucceeded=!0,o.isStreaming=!1),!f&&!d&&(o.isStreaming=!0),o.processContents=[...a.filter(q),...m.filter(q)],o.pendingStatus=uClawAssistantTurnPendingStatus(i),", "let s=uClawAssistantTurnHasRunningContent(i),c=uClawAssistantTurnHasFinalContent(i),l=(o.messages??[]).flatMap(e=>lb(e.message,e.key)),u=l.length>0&&l.every(e=>e.outputText!==void 0||e.isError===!0),d=l.some(Xy),h=l.some(e=>uClawChatToolDisplayName(e.name)===`图片生成`),f=!s&&(o.turnSucceeded===!0||c||u&&!d&&!h),p=f?i.filter(e=>!uClawIsAssistantPendingRenderItem(e)):[],m=f?i.filter(uClawIsAssistantPendingRenderItem):i;return o.hasFinalContents=c,f&&(o.turnSucceeded=!0,o.isStreaming=!1),!f&&!d&&(o.isStreaming=!0),o.processContents=[...a.filter(q),...m.filter(q)],o.pendingStatus=uClawAssistantTurnPendingStatus(i),")
-      .replace("y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);", "y=i?.pendingStatus||(u.running&&typeof u.detail==`string`?(u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:u.detail.startsWith(`正在`)?u.detail:null):null);");
+      .replace("y=i?.pendingStatus||(u.running&&typeof u.detail==`string`&&u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:null);", "y=i?.pendingStatus||(u.running&&typeof u.detail==`string`?(u.detail.startsWith(`当前：`)?`正在调用 ${u.detail.slice(3)}`:u.detail.startsWith(`正在`)?u.detail:null):null);")
+      .replace("let d=`activity:${i?.key??e.key}:${u.running||l?`running`:`done`}`,b=t.isToolMessageExpanded?.(d),f=u.running||l?b!==!1:b===!0,p=e.contents??[],v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0,m=p.length>0?uClawAssistantTurnTimestamp(p):e.timestamp;", "let d=`activity:${i?.key??e.key}:${u.running||l?`running`:`done`}`,b=t.isToolMessageExpanded?.(d),p=e.contents??[],v=(i?.processContents?.length||0)>0||(i?.messages?.length||0)>0,f=v&&(u.running||l?b!==!1:b===!0),m=p.length>0?uClawAssistantTurnTimestamp(p):e.timestamp;");
     const compactRenderItemsStart = after.indexOf("function uClawRenderItemRole(") >= 0
       ? after.indexOf("function uClawRenderItemRole(")
       : after.indexOf("function uClawIsToolRenderItem(");
@@ -1350,10 +1351,16 @@ function patchControlCss() {
     ".agent-chat__composer-shell .agent-chat__input:focus-within{border-color:#d0d7e2!important;outline:none!important;box-shadow:0 10px 28px rgba(16,22,43,.08)!important}",
   ].join("");
   const turnExecutionGroupingCss = [
-    "/* uclaw-turn-execution-grouping-17 */",
+    "/* uclaw-turn-execution-grouping-19 */",
     ".chat-group>.chat-avatar{align-self:flex-start!important;margin-top:2px;margin-bottom:0!important}",
     ".chat-group--assistant-turn .chat-group-messages{max-width:var(--chat-message-max-width,min(900px,68%))}",
-    ".chat-group--assistant-turn .chat-activity-group--turn{width:100%;margin-bottom:6px}",
+    ".chat-group--assistant-turn .chat-activity-group--turn{width:fit-content;max-width:100%;margin-bottom:6px}",
+    ".chat-group--assistant-turn .chat-activity-group--turn.is-open{width:100%}",
+    ".chat-group--assistant-turn .chat-activity-group--turn:not(.is-open) .chat-activity-group__summary{width:auto}",
+    ".chat-group--assistant-turn button.chat-activity-group__summary:not(:has(.collapse-chevron)){cursor:default}",
+    ".chat-group--assistant-turn button.chat-activity-group__summary:not(:has(.collapse-chevron)):hover,.chat-group--assistant-turn button.chat-activity-group__summary:not(:has(.collapse-chevron)):focus-visible{background:transparent!important;color:var(--muted)!important}",
+    ".chat-group--assistant-turn .chat-activity-group__summary .collapse-chevron{margin-left:2px;color:var(--muted)!important;transition:transform .14s ease;flex:0 0 auto}",
+    ".chat-group--assistant-turn .chat-activity-group__summary .collapse-chevron--collapsed{transform:rotate(-90deg)}",
     ".chat-group--assistant-turn .chat-activity-group__process{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid color-mix(in srgb,var(--border,#d9d9d4) 72%,transparent)}",
     ".chat-group--assistant-turn .chat-activity-group__body{margin-left:0!important;padding:8px 12px 10px 14px!important}",
     ".chat-group--assistant-turn .chat-activity-group__body>.chat-bubble--tool-shell{margin:0!important}",
@@ -1397,7 +1404,6 @@ function patchControlCss() {
     ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .chat-reading-indicator__dots{width:14px;height:14px;border:2px solid color-mix(in srgb,var(--accent,#2563eb) 24%,transparent);border-top-color:var(--accent,#2563eb);border-radius:50%;animation:uclaw-activity-spin .7s linear infinite}",
     ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .chat-reading-indicator__dots span{display:none!important}",
     ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .uclaw-chat-reading-status__label{color:var(--accent,#2563eb)!important;font-weight:600}",
-    ".chat-group:not(.chat-group--assistant-turn) .chat-reading-indicator.uclaw-chat-reading-status .uclaw-chat-reading-status__label::after{content:' · 执行过程'}",
     ".chat-tool-card__block-content{max-height:min(360px,46vh)}",
     ".chat-group.tool + .chat-group.assistant{margin-top:0}",
     ".chat-group.tool + .chat-group.assistant>.chat-avatar{visibility:hidden!important}",
@@ -1453,8 +1459,8 @@ function patchControlCss() {
     after = after.replace(/\/\* uclaw-turn-execution-grouping-13 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
     after = after.replace(/\/\* uclaw-turn-execution-grouping-14 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
     after = after.replace(/\/\* uclaw-turn-execution-grouping-15 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
-    after = after.replace(/\/\* uclaw-turn-execution-grouping-16 \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
-    if (!after.includes("uclaw-turn-execution-grouping-17")) {
+    after = after.replace(/\/\* uclaw-turn-execution-grouping-\d+ \*\/\.chat-group>\.chat-avatar\{[\s\S]*?@media \(width<=720px\)\{\.chat-group\.tool \.chat-group-messages\{max-width:calc\(100% - 24px\)!important\}\}/g, "");
+    if (!after.includes("uclaw-turn-execution-grouping-19")) {
       after = `${after}\n${turnExecutionGroupingCss}\n`;
     }
     if (!after.includes("uclaw-chat-reading-status-1")) {
@@ -2727,14 +2733,14 @@ function patchServiceWorker() {
     /chat-background-session-status-1(?!-alipay-recharge-qr-1)/,
     "chat-background-session-status-1-alipay-recharge-qr-1",
   );
-  source = source.replace(/-chat-execution-grouping-(?:[1-9]|1[0-6])/g, "");
+  source = source.replace(/-chat-execution-grouping-\d+/g, "");
   source = source.replace(
-    /alipay-recharge-qr-1(?!-chat-execution-grouping-16)/,
-    "alipay-recharge-qr-1-chat-execution-grouping-16",
+    /alipay-recharge-qr-1(?!-chat-execution-grouping-19)/,
+    "alipay-recharge-qr-1-chat-execution-grouping-19",
   );
   source = source.replace(
-    /chat-execution-grouping-16(?!-chat-delete-i18n-1)/,
-    "chat-execution-grouping-16-chat-delete-i18n-1",
+    /chat-execution-grouping-19(?!-chat-delete-i18n-1)/,
+    "chat-execution-grouping-19-chat-delete-i18n-1",
   );
   source = source.replace(
     /chat-delete-i18n-1(?!-chat-composer-single-action-1)/,
