@@ -14,6 +14,8 @@ const skillsGatewayPath = path.join(openclawDistDir, "skills-ieKSTXPw.js");
 const schemaPath = path.join(openclawDistDir, "schema-BuOFpc7K.js");
 const serverMethodsPath = path.join(openclawDistDir, "server-methods-NpEcZnvp.js");
 const coreDescriptorsPath = path.join(openclawDistDir, "core-descriptors-DRUtdasO.js");
+const sessionTranscriptPath = path.join(openclawDistDir, "session-transcript-path-EobUxjvp.js");
+const chatGatewayPath = path.join(openclawDistDir, "chat-pg-BxhF6.js");
 const ecommerceWorkflowSkillSourcePath = path.join(__dirname, "ecommerce-main-detail-workflow.SKILL.md");
 const ecommerceTaskPageMethodsSourcePath = path.join(__dirname, "ecommerce-task-page-methods.source.txt");
 const ecommerceWorkflowSkillTargetPath = path.join(
@@ -827,6 +829,10 @@ function patchChatPage() {
       "l(nx(h),e=>e.key,t=>t.kind===`divider`?",
       "l(uClawCompactChatRenderItems(nx(h)),e=>e.key,t=>t.kind===`divider`?",
     );
+    after = after.replaceAll(
+      "f([h,rx(m,h),ix(g),Wx(),e.sessionKey",
+      "f([h,rx(m,uClawCompactChatRenderItems(nx(h))),ix(g),Wx(),e.sessionKey",
+    );
     const streamRunRenderBranch =
       ":t.kind===`stream-run`?hS(t.parts,{onOpenSidebar:e.onOpenSidebar,assistant:u,basePath:e.basePath,authToken:e.assistantAttachmentAuthToken??null}):t.kind===`group`?";
     const assistantTurnRenderPrefix =
@@ -1026,6 +1032,7 @@ function patchChatPage() {
       "function uClawHasLiveSession(e){return!!(e.chatRunId||Array.isArray(e.chatQueue)&&e.chatQueue.length>0||e.chatStream!==null||Array.isArray(e.chatStreamSegments)&&e.chatStreamSegments.length>0||Array.isArray(e.chatToolMessages)&&e.chatToolMessages.length>0||Array.isArray(e.toolStreamOrder)&&e.toolStreamOrder.length>0)}",
       "function uClawSaveLiveSession(e,t){if(!t)return;let n=uClawLiveSessions(e);if(!uClawHasLiveSession(e)){n.delete(t);return}n.set(t,uClawLiveSessionSnapshot(e));for(;n.size>30;){let e=n.keys().next().value;n.delete(e)}}",
       "function uClawForgetLiveSession(e,t){if(!t)return;uClawLiveSessions(e).delete(t)}",
+      "function uClawRememberHiddenSubmittedChat(e,t,n,r,i,a,o){if(!t)return;let s={role:`user`,content:Dh(r,i),timestamp:a};Rc(e.chatMessagesBySession,e,{sessionKey:t,agentId:n},s);let c=uClawLiveSessions(e),l=c.get(t)??uClawEmptyLiveSession({runId:o?.runId??null});l.chatMessages=ql(l.chatMessages??[],[s]),l.chatRunId=o?.runId??l.chatRunId??null,np(o?.status)&&(l.chatStream=typeof l.chatStream==`string`?l.chatStream:``,l.chatStreamStartedAt=l.chatStreamStartedAt??a,l.uClawRestoredRunSyncing=!1),l.savedAt=Date.now(),c.set(t,l)}",
       "function uClawActiveSessionStillRunning(e,t){let n=e.sessionsResult?.sessions?.find(e=>se(e.key,t));return!!(n&&Je(n))}",
       "function uClawMergeLiveQueue(e,t){if(!Array.isArray(t)||t.length===0)return;let n=new Set((e.chatQueue??[]).map(e=>e.id));e.chatQueue=[...e.chatQueue??[],...t.filter(e=>!n.has(e.id))]}",
       "function uClawApplyLiveSession(e,t){Array.isArray(t.chatMessages)&&t.chatMessages.length>0&&(e.chatMessages=ql(e.chatMessages,t.chatMessages)),uClawMergeLiveQueue(e,t.chatQueue),e.chatRunId=t.chatRunId??null,e.chatStream=typeof t.chatStream==`string`?t.chatStream:null,e.chatStreamStartedAt=t.chatStreamStartedAt??(e.chatStream!==null?Date.now():null),e.chatStreamSegments=[...t.chatStreamSegments??[]],e.chatToolMessages=[...t.chatToolMessages??[]],e.toolStreamOrder=[...t.toolStreamOrder??[]],e.toolStreamById=new Map(t.toolEntries??[]),e.chatRunStatus=t.chatRunStatus??null,e.uClawRestoredRunSyncing=t.uClawRestoredRunSyncing===!0}",
@@ -1070,8 +1077,16 @@ function patchChatPage() {
       "t.clearChatStream&&(e.chatStream=null,e.chatStreamStartedAt=null,e.uClawRestoredRunSyncing=!1)",
     );
     after = after.replace(
+      "await e.sessions.reset(e.sessionKey,ft(e,e.sessionKey)),e.chatMessages=[],mu(e,e.sessionKey)",
+      "uClawForgetLiveSession(e,e.sessionKey),await e.sessions.reset(e.sessionKey,ft(e,e.sessionKey)),e.chatMessages=[],mu(e,e.sessionKey)",
+    );
+    after = after.replace(
       "if(!r&&!i){if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}}uClawHandleBackgroundSessionTerminal(e,t);return null}",
       "if(!r&&!i){if(t.state===`delta`)uClawRememberBackgroundDelta(e,t);else if(t.state===`final`){let n=kg(t.message);if(n&&!zl(n)){let r=P(t.sessionKey)?t.agentId??fe(e):t.agentId;jg(e,t.sessionKey,n,r)}uClawForgetLiveSession(e,t.sessionKey)}uClawHandleBackgroundSessionTerminal(e,t);return null}",
+    );
+    after = after.replace(
+      "if(cd(e,t,l),m())if(Vh(e,o,c?s:void 0,d),r.status===`ok`)",
+      "let y=cd(e,t,l);!m()&&y&&uClawRememberHiddenSubmittedChat(e,l,a.agentId,o,c?s:void 0,d,r);if(m())if(Vh(e,o,c?s:void 0,d),r.status===`ok`)",
     );
     after = after.replace(
       /(?:pu\(e\)&&!e\.chatRunId&&e\.chatStream===null&&\(e\.chatStream=``,e\.chatStreamStartedAt\?\?=Date\.now\(\),e\.uClawRestoredRunSyncing=!0\);)+/g,
@@ -1090,9 +1105,13 @@ function patchChatPage() {
       "function uClawSaveLiveSession(",
       "function uClawRestoreLiveSession(",
       "uClawSaveLiveSession(e,n)",
+      "rx(m,uClawCompactChatRenderItems(nx(h)))",
       "let r=uClawRestoreLiveSession(e,t)",
+      "uClawForgetLiveSession(e,e.sessionKey),await e.sessions.reset",
       "chatLiveBySession:new Map",
       "__uclawChatLiveBySession",
+      "function uClawRememberHiddenSubmittedChat(",
+      "uClawRememberHiddenSubmittedChat(e,l,a.agentId,o,c?s:void 0,d,r)",
       "function uClawRememberBackgroundDelta(",
       "function uClawRememberBackgroundStreamItem(",
       "uClawForgetLiveSession(e,t.sessionKey)",
@@ -2745,6 +2764,14 @@ function patchServiceWorker() {
   source = source.replace(
     /chat-delete-i18n-1(?!-chat-composer-single-action-1)/,
     "chat-delete-i18n-1-chat-composer-single-action-1",
+  );
+  source = source.replace(
+    /chat-composer-single-action-1(?!-chat-delete-render-cache-1)/,
+    "chat-composer-single-action-1-chat-delete-render-cache-1",
+  );
+  source = source.replace(
+    /chat-delete-render-cache-1(?!-chat-hidden-send-restore-1)/,
+    "chat-delete-render-cache-1-chat-hidden-send-restore-1",
   );
   source = source.replace(
     /ecommerce-stale-records-1(?!-ecommerce-preview-select-1)/,
@@ -6319,6 +6346,295 @@ function patchChatUiCopy() {
     const after = replacePairs(before, pairs);
     if (writeIfChanged(file, before, after)) {
       console.log(`patched ${path.relative(root, file)}`);
+    }
+  }
+}
+
+/**
+ * Preserves concrete runtime error details in chat history instead of collapsing
+ * every failed assistant turn into a generic failure sentence.
+ */
+function patchChatErrorDetails() {
+  {
+    const before = read(sessionTranscriptPath);
+    let after = before;
+    const helperMarker = "function uClawChatErrorDisplayText(message)";
+    const fallbackNeedle =
+      'const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "The agent run failed before producing a reply.";';
+    const fallbackReplacement = `function uClawChatErrorTextFromValue(value) {
+\tif (value == null) return;
+\tif (typeof value === "string") {
+\t\tconst text = value.trim();
+\t\treturn text || void 0;
+\t}
+\tif (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+\tif (typeof value === "object") {
+\t\tconst record = value;
+\t\tfor (const key of ["message", "error", "detail", "details", "summary", "reason", "code", "type"]) {
+\t\t\tconst text = uClawChatErrorTextFromValue(record[key]);
+\t\t\tif (text) return text;
+\t\t}
+\t\ttry {
+\t\t\tconst text = JSON.stringify(value);
+\t\t\treturn typeof text === "string" && text.trim() ? text.trim() : void 0;
+\t\t} catch {
+\t\t\treturn;
+\t\t}
+\t}
+}
+function uClawChatTrimErrorText(text) {
+\tconst trimmed = String(text ?? "")
+\t\t.replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-***")
+\t\t.replace(/Bearer\\s+[A-Za-z0-9._-]{12,}/gi, "Bearer ***")
+\t\t.replace(/(api[_-]?key|token|authorization)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=***")
+\t\t.replace(/\\s+/g, " ")
+\t\t.trim();
+\tif (!trimmed) return;
+\treturn trimmed.length > 500 ? \`\${trimmed.slice(0, 497)}...\` : trimmed;
+}
+function uClawChatErrorDisplayText(message) {
+\tif (!message || typeof message !== "object") return;
+\tconst record = message;
+\tconst raw = uClawChatErrorTextFromValue(record.errorMessage) ?? uClawChatErrorTextFromValue(record.errorBody) ?? uClawChatErrorTextFromValue(record.error) ?? uClawChatErrorTextFromValue(record.diagnostics) ?? uClawChatErrorTextFromValue(record.errorCode) ?? uClawChatErrorTextFromValue(record.errorType);
+\tconst text = uClawChatTrimErrorText(raw);
+\tif (!text || text === "The agent run failed before producing a reply.") return;
+\tconst lower = text.toLowerCase();
+\tlet reason = "";
+\tif (/insufficient|balance|quota|billing|credit|no\\s*money|余额|额度|欠费/.test(lower)) reason = "渠道余额不足";
+\telse if (/rate.?limit|too many requests|\\b429\\b|temporarily rate-limited|限流/.test(lower)) reason = "模型暂时限流";
+\telse if (/unauthori[sz]ed|invalid api key|\\b401\\b|api key/.test(lower)) reason = "API Key 无效";
+\telse if (/forbidden|permission|\\b403\\b|无权|权限/.test(lower)) reason = "渠道无权限";
+\telse if (/model.*not.*found|not found.*model|unknown model|模型不存在/.test(lower)) reason = "模型不存在或未开通";
+\telse if (/timeout|timed out|超时/.test(lower)) reason = "请求超时";
+\telse if (/network|fetch failed|econnreset|econnrefused|etimedout|连接/.test(lower)) reason = "网络连接失败";
+\treturn reason ? \`回复生成失败：\${reason}。\${text}\` : \`回复生成失败：\${text}\`;
+}
+const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "回复生成失败，未返回具体错误。请查看日志。";`;
+    if (!after.includes(helperMarker)) {
+      if (!after.includes(fallbackNeedle)) {
+        throw new Error("Could not find assistant error fallback constant");
+      }
+      after = after.replace(fallbackNeedle, fallbackReplacement);
+    } else {
+      after = after.replace(
+        'const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "The agent run failed before producing a reply.";',
+        'const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "回复生成失败，未返回具体错误。请查看日志。";',
+      );
+    }
+    const sanitizeNeedle = `\tnext.content = Array.isArray(content) ? content.map((block) => sanitizeChatHistoryContentBlock(block, { maxChars: Number.MAX_SAFE_INTEGER }).block).filter((block) => {
+\t\tif (!block || typeof block !== "object" || Array.isArray(block)) return true;
+\t\tconst type = block.type;
+\t\treturn type !== "thinking" && type !== "reasoning" && type !== "redacted_thinking";
+\t}) : content;
+\tdelete next.diagnostics;`;
+    const sanitizeReplacement = `\tnext.content = Array.isArray(content) ? content.map((block) => sanitizeChatHistoryContentBlock(block, { maxChars: Number.MAX_SAFE_INTEGER }).block).filter((block) => {
+\t\tif (!block || typeof block !== "object" || Array.isArray(block)) return true;
+\t\tconst type = block.type;
+\t\treturn type !== "thinking" && type !== "reasoning" && type !== "redacted_thinking";
+\t}) : content;
+\tconst uClawVisibleErrorText = uClawChatErrorDisplayText(message);
+\tif (uClawVisibleErrorText) next.content = [{
+\t\ttype: "text",
+\t\ttext: uClawVisibleErrorText
+\t}];
+\tdelete next.diagnostics;`;
+    if (!after.includes("const uClawVisibleErrorText = uClawChatErrorDisplayText(message);")) {
+      if (!after.includes(sanitizeNeedle)) {
+        throw new Error("Could not find assistant error sanitizer content assignment");
+      }
+      after = after.replace(sanitizeNeedle, sanitizeReplacement);
+    }
+    after = after.replace(
+      "\t\t\t\ttext: GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT\n",
+      "\t\t\t\ttext: uClawChatErrorDisplayText(message) ?? GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT\n",
+    );
+    if (writeIfChanged(sessionTranscriptPath, before, after)) {
+      console.log(`patched ${path.relative(root, sessionTranscriptPath)}`);
+    }
+  }
+
+  {
+    const before = read(chatGatewayPath);
+    let after = before;
+    const assistantNeedle = `\t\tstopReason: "stop",
+\t\tusage: {`;
+    const assistantReplacement = `\t\tstopReason: params.stopReason ?? (params.errorMessage ? "error" : "stop"),
+\t\tusage: {`;
+    if (!after.includes("params.stopReason ?? (params.errorMessage ? \"error\" : \"stop\")")) {
+      if (!after.includes(assistantNeedle)) {
+        throw new Error("Could not find injected assistant stopReason");
+      }
+      after = after.replace(assistantNeedle, assistantReplacement);
+    }
+    const errorFieldNeedle = `\t\tapi: "openai-responses",
+\t\tprovider: "openclaw",
+\t\tmodel: "gateway-injected",
+\t\t...params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {},`;
+    const errorFieldReplacement = `\t\tapi: "openai-responses",
+\t\tprovider: "openclaw",
+\t\tmodel: "gateway-injected",
+\t\t...params.errorMessage ? { errorMessage: params.errorMessage } : {},
+\t\t...params.errorBody ? { errorBody: params.errorBody } : {},
+\t\t...params.errorCode ? { errorCode: params.errorCode } : {},
+\t\t...params.errorType ? { errorType: params.errorType } : {},
+\t\t...params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {},`;
+    if (!after.includes("...params.errorMessage ? { errorMessage: params.errorMessage } : {}")) {
+      if (!after.includes(errorFieldNeedle)) {
+        throw new Error("Could not find injected assistant metadata block");
+      }
+      after = after.replace(errorFieldNeedle, errorFieldReplacement);
+    }
+    const passThroughNeedle = `\t\tcontent: params.content,
+\t\tidempotencyKey: params.idempotencyKey,
+\t\tabortMeta: params.abortMeta,`;
+    const passThroughReplacement = `\t\tcontent: params.content,
+\t\tstopReason: params.stopReason,
+\t\terrorMessage: params.errorMessage,
+\t\terrorBody: params.errorBody,
+\t\terrorCode: params.errorCode,
+\t\terrorType: params.errorType,
+\t\tidempotencyKey: params.idempotencyKey,
+\t\tabortMeta: params.abortMeta,`;
+    if (!after.includes("errorMessage: params.errorMessage,\n\t\terrorBody: params.errorBody")) {
+      if (!after.includes(passThroughNeedle)) {
+        throw new Error("Could not find assistant transcript wrapper passthrough");
+      }
+      after = after.replace(passThroughNeedle, passThroughReplacement);
+    }
+    const appendErrorHelperNeedle = `function sendGlobalAwareNodeChatPayload(params) {`;
+    const visibleErrorHelper = `function uClawVisibleWebchatErrorText(value) {
+\tconst text = String(value ?? "")
+\t\t.replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-***")
+\t\t.replace(/Bearer\\s+[A-Za-z0-9._-]{12,}/gi, "Bearer ***")
+\t\t.replace(/(api[_-]?key|token|authorization)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=***")
+\t\t.replace(/\\s+/g, " ")
+\t\t.trim();
+\tif (!text) return;
+\treturn text.length > 500 ? \`\${text.slice(0, 497)}...\` : text;
+}
+`;
+    const appendErrorTranscriptHelper = `async function appendWebchatErrorTranscript(params) {
+\tconst errorMessage = String(params.errorMessage ?? "").trim();
+\tif (!errorMessage || params.context.chatAbortedRuns.has(params.runId)) return;
+\ttry {
+\t\tconst { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(params.sessionKey, params.sessionLoadOptions);
+\t\tconst sessionId = latestEntry?.sessionId ?? params.backingSessionId ?? params.runId;
+\t\tconst visibleErrorText = uClawVisibleWebchatErrorText(errorMessage) ?? "unknown error";
+\t\tconst displayText = visibleErrorText.startsWith("⚠️") || visibleErrorText.startsWith("Error:") ? visibleErrorText : \`Error: \${visibleErrorText}\`;
+\t\tconst appended = await appendAssistantTranscriptMessage({
+\t\t\tsessionKey: params.sessionKey,
+\t\t\tmessage: displayText,
+\t\t\tcontent: [{
+\t\t\t\ttype: "text",
+\t\t\t\ttext: displayText
+\t\t\t}],
+\t\t\tsessionId,
+\t\t\tstorePath: latestStorePath,
+\t\t\tsessionFile: latestEntry?.sessionFile,
+\t\t\tagentId: params.agentId,
+\t\t\tcreateIfMissing: true,
+\t\t\tidempotencyKey: \`\${params.runId}:error\`,
+\t\t\tcfg: params.config,
+\t\t\tstopReason: "error",
+\t\t\terrorMessage
+\t\t});
+\t\tif (!appended.ok) params.context.logGateway.warn(\`webchat error transcript append failed: \${appended.error ?? "unknown error"}\`);
+\t} catch (err) {
+\t\tparams.context.logGateway.warn(\`webchat error transcript append failed: \${formatForLog(err)}\`);
+\t}
+}
+`;
+    if (!after.includes("function uClawVisibleWebchatErrorText(value)")) {
+      if (after.includes("async function appendWebchatErrorTranscript(params)")) {
+        after = after.replace(
+          "async function appendWebchatErrorTranscript(params) {",
+          `${visibleErrorHelper}async function appendWebchatErrorTranscript(params) {`,
+        );
+      } else {
+        if (!after.includes(appendErrorHelperNeedle)) {
+          throw new Error("Could not find chat payload helper insertion point");
+        }
+        after = after.replace(
+          appendErrorHelperNeedle,
+          `${visibleErrorHelper}${appendErrorTranscriptHelper}${appendErrorHelperNeedle}`,
+        );
+      }
+    } else if (!after.includes("async function appendWebchatErrorTranscript(params)")) {
+      if (!after.includes(appendErrorHelperNeedle)) {
+        throw new Error("Could not find chat payload helper insertion point");
+      }
+      after = after.replace(appendErrorHelperNeedle, `${appendErrorTranscriptHelper}${appendErrorHelperNeedle}`);
+    }
+    after = after.replace(
+      "\tconst errorText = params.errorMessage?.trim();",
+      "\tconst errorText = uClawVisibleWebchatErrorText(params.errorMessage);",
+    );
+    after = after.replace(
+      "\t\tconst displayText = errorMessage.startsWith(\"⚠️\") || errorMessage.startsWith(\"Error:\") ? errorMessage : `Error: ${errorMessage}`;",
+      "\t\tconst visibleErrorText = uClawVisibleWebchatErrorText(errorMessage) ?? \"unknown error\";\n\t\tconst displayText = visibleErrorText.startsWith(\"⚠️\") || visibleErrorText.startsWith(\"Error:\") ? visibleErrorText : `Error: ${visibleErrorText}`;",
+    );
+    const catchBroadcastNeedle = `\t\t\t\tbroadcastChatError({
+\t\t\t\t\tcontext,
+\t\t\t\t\trunId: clientRunId,
+\t\t\t\t\tsessionKey,
+\t\t\t\t\tagentId,
+\t\t\t\t\terrorMessage
+\t\t\t\t});`;
+    const catchBroadcastReplacement = `\t\t\t\tawait appendWebchatErrorTranscript({
+\t\t\t\t\tcontext,
+\t\t\t\t\trunId: clientRunId,
+\t\t\t\t\tsessionKey,
+\t\t\t\t\tsessionLoadOptions,
+\t\t\t\t\tbackingSessionId,
+\t\t\t\t\tagentId,
+\t\t\t\t\tconfig: cfg,
+\t\t\t\t\terrorMessage
+\t\t\t\t});
+\t\t\t\tbroadcastChatError({
+\t\t\t\t\tcontext,
+\t\t\t\t\trunId: clientRunId,
+\t\t\t\t\tsessionKey,
+\t\t\t\t\tagentId,
+\t\t\t\t\terrorMessage
+\t\t\t\t});`;
+    if (!after.includes("await appendWebchatErrorTranscript({\n\t\t\t\t\tcontext,")) {
+      if (!after.includes(catchBroadcastNeedle)) {
+        throw new Error("Could not find async dispatch chat error broadcast");
+      }
+      after = after.replace(catchBroadcastNeedle, catchBroadcastReplacement);
+    }
+    const outerBroadcastNeedle = `\t\t\tbroadcastChatError({
+\t\t\t\tcontext,
+\t\t\t\trunId: clientRunId,
+\t\t\t\tsessionKey,
+\t\t\t\tagentId,
+\t\t\t\terrorMessage: String(err)
+\t\t\t});`;
+    const outerBroadcastReplacement = `\t\t\tawait appendWebchatErrorTranscript({
+\t\t\t\tcontext,
+\t\t\t\trunId: clientRunId,
+\t\t\t\tsessionKey,
+\t\t\t\tsessionLoadOptions,
+\t\t\t\tbackingSessionId,
+\t\t\t\tagentId,
+\t\t\t\tconfig: cfg,
+\t\t\t\terrorMessage: String(err)
+\t\t\t});
+\t\t\tbroadcastChatError({
+\t\t\t\tcontext,
+\t\t\t\trunId: clientRunId,
+\t\t\t\tsessionKey,
+\t\t\t\tagentId,
+\t\t\t\terrorMessage: String(err)
+\t\t\t});`;
+    if (!after.includes("errorMessage: String(err)\n\t\t\t});\n\t\t\tbroadcastChatError({")) {
+      if (!after.includes(outerBroadcastNeedle)) {
+        throw new Error("Could not find outer chat error broadcast");
+      }
+      after = after.replace(outerBroadcastNeedle, outerBroadcastReplacement);
+    }
+    if (writeIfChanged(chatGatewayPath, before, after)) {
+      console.log(`patched ${path.relative(root, chatGatewayPath)}`);
     }
   }
 }
@@ -10946,6 +11262,7 @@ patchChatPage();
 patchChatComposerTextModelsOnly();
 patchSessionTerminalReconcile();
 patchChatUiCopy();
+patchChatErrorDetails();
 patchAssistantIdentityUiCopy();
 patchChatSkillHubDropdown();
 patchSkillsPageBranding();

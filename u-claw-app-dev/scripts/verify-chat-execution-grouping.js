@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+const openclawDistDir = path.join(root, "node_modules", "openclaw", "dist");
 const assetsDir = path.join(root, "node_modules", "openclaw", "dist", "control-ui", "assets");
 const patchFile = path.join(root, "scripts", "patch-openclaw.js");
 const swFile = path.join(root, "node_modules", "openclaw", "dist", "control-ui", "sw.js");
@@ -27,6 +28,8 @@ function findAsset(pattern, label) {
 
 const chatSource = read(findAsset(/^chat-page-.*\.js$/, "chat-page bundle"));
 const cssSource = read(findAsset(/^index-.*\.css$/, "control-ui stylesheet"));
+const sessionTranscriptSource = read(path.join(openclawDistDir, "session-transcript-path-EobUxjvp.js"));
+const chatGatewaySource = read(path.join(openclawDistDir, "chat-pg-BxhF6.js"));
 const patchSource = read(patchFile);
 const swSource = read(swFile);
 
@@ -88,11 +91,15 @@ const checks = [
   [chatSource, "function uClawMergeLiveQueue(", "running chat restore merges cached user queue"],
   [chatSource, "e.chatMessages=ql(e.chatMessages,t.chatMessages)", "running chat restore merges cached local messages"],
   [chatSource, "uClawSaveLiveSession(e,n)", "session switch saves live stream state"],
+  [chatSource, "rx(m,uClawCompactChatRenderItems(nx(h)))", "deleted synthetic assistant turns invalidate render cache"],
   [chatSource, "let r=uClawRestoreLiveSession(e,t)", "session switch restores live stream state"],
+  [chatSource, "uClawForgetLiveSession(e,e.sessionKey),await e.sessions.reset", "clearing chat history drops stale live cache"],
   [chatSource, "chatLiveBySession:new Map", "component state owns live session cache"],
   [chatSource, "__uclawChatLiveBySession", "live session cache survives chat component remounts"],
   [chatSource, "function uClawRememberBackgroundDelta(", "background text deltas are cached when received"],
   [chatSource, "function uClawRememberBackgroundStreamItem(", "background tool stream items are cached when received"],
+  [chatSource, "function uClawRememberHiddenSubmittedChat(", "hidden-session send acknowledgements preserve optimistic user messages"],
+  [chatSource, "uClawRememberHiddenSubmittedChat(e,l,a.agentId,o,c?s:void 0,d,r)", "send acknowledgement updates hidden session cache"],
   [chatSource, "uClawForgetLiveSession(e,t.sessionKey)", "background final clears stale live cache"],
   [chatSource, "pu(e)&&uClawRestoreLiveSession(e,n)", "history refresh restores live cache before falling back to syncing"],
   [chatSource, "正在同步进度", "restored active sessions show syncing status"],
@@ -106,6 +113,20 @@ const checks = [
   [chatSource, ">取消</button>", "delete confirmation cancel action is localized"],
   [chatSource, ">删除</button>", "delete confirmation destructive action is localized"],
   [chatSource, "!t&&e.canAbort?s`", "composer stop button only renders when the draft is empty"],
+  [sessionTranscriptSource, "function uClawChatErrorDisplayText(message)", "assistant error display preserves real error details"],
+  [sessionTranscriptSource, "uClawChatErrorDisplayText(message) ?? GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT", "empty assistant errors prefer real error metadata"],
+  [sessionTranscriptSource, "const uClawVisibleErrorText = uClawChatErrorDisplayText(message);", "visible assistant errors are replaced with sanitized real error details"],
+  [sessionTranscriptSource, "回复生成失败，未返回具体错误。请查看日志。", "assistant error fallback is localized"],
+  [chatGatewaySource, "params.stopReason ?? (params.errorMessage ? \"error\" : \"stop\")", "gateway injected assistant messages can persist error stopReason"],
+  [chatGatewaySource, "...params.errorMessage ? { errorMessage: params.errorMessage } : {}", "gateway injected assistant messages preserve errorMessage"],
+  [chatGatewaySource, "async function appendWebchatErrorTranscript(params)", "gateway dispatch errors are persisted to transcript"],
+  [chatGatewaySource, "function uClawVisibleWebchatErrorText(value)", "realtime gateway error text is sanitized before display"],
+  [chatGatewaySource, "const errorText = uClawVisibleWebchatErrorText(params.errorMessage);", "chat error broadcasts use sanitized visible text"],
+  [chatGatewaySource, "idempotencyKey: `${params.runId}:error`", "persisted gateway errors are idempotent"],
+  [patchSource, "function patchChatErrorDetails()", "patch script owns chat error detail preservation"],
+  [patchSource, "uClawChatErrorDisplayText(message) ?? GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT", "patch script preserves real error details in history projection"],
+  [patchSource, "async function appendWebchatErrorTranscript(params)", "patch script owns gateway error transcript append"],
+  [patchSource, "function uClawVisibleWebchatErrorText(value)", "patch script owns realtime gateway error display sanitizing"],
   [cssSource, "uclaw-turn-execution-grouping-19", "runtime stylesheet has execution grouping marker"],
   [cssSource, "uclaw-chat-reading-status-1", "runtime stylesheet has semantic loading marker"],
   [cssSource, ".chat-group--assistant-turn .chat-activity-group--turn", "execution trace renders inside the assistant turn"],
@@ -131,7 +152,7 @@ const checks = [
   [cssSource, ".chat-group>.chat-avatar{align-self:flex-start!important", "avatars align with the first message line"],
   [cssSource, ".chat-group.assistant:has(+ .chat-group.tool) + .chat-group.tool>.chat-avatar{visibility:hidden!important}", "tool avatar is hidden only after an assistant avatar is already visible"],
   [cssSource, ".chat-group.tool + .chat-group.assistant>.chat-avatar{visibility:hidden!important}", "repeated assistant avatar is suppressed after tool trace"],
-  [swSource, "chat-execution-grouping-19-chat-delete-i18n-1-chat-composer-single-action-1", "service worker cache version changes for composer single action"],
+  [swSource, "chat-execution-grouping-19-chat-delete-i18n-1-chat-composer-single-action-1-chat-delete-render-cache-1-chat-hidden-send-restore-1", "service worker cache version changes for hidden send restore"],
   [patchSource, "uclaw-turn-execution-grouping-19", "patch script owns execution grouping marker"],
   [patchSource, "u.running||l?`running`:`done`", "patch script separates running and completed expansion state"],
   [patchSource, "f=v&&(u.running||l?b!==!1:b===!0)", "empty execution traces cannot enter expanded state"],
@@ -166,9 +187,13 @@ const checks = [
   [patchSource, "chatMessages:[...e.chatMessages??[]]", "patch script preserves optimistic local messages in live cache"],
   [patchSource, "chatQueue:[...e.chatQueue??[]]", "patch script preserves in-flight user queue in live cache"],
   [patchSource, "function uClawMergeLiveQueue(", "patch script owns live queue restore helper"],
+  [patchSource, "rx(m,uClawCompactChatRenderItems(nx(h)))", "patch script invalidates render cache for synthetic assistant turn deletes"],
+  [patchSource, "uClawForgetLiveSession(e,e.sessionKey),await e.sessions.reset", "patch script clears live cache when chat history is cleared"],
   [patchSource, "__uclawChatLiveBySession", "patch script stores live cache globally"],
   [patchSource, "function uClawRememberBackgroundDelta(", "patch script owns background delta cache helper"],
   [patchSource, "function uClawRememberBackgroundStreamItem(", "patch script owns background tool cache helper"],
+  [patchSource, "function uClawRememberHiddenSubmittedChat(", "patch script owns hidden-session send restore helper"],
+  [patchSource, "uClawRememberHiddenSubmittedChat(e,l,a.agentId,o,c?s:void 0,d,r)", "patch script updates hidden session cache after send acknowledgement"],
   [patchSource, "uClawForgetLiveSession(e,t.sessionKey)", "patch script clears background final live cache"],
   [patchSource, "pu(e)&&uClawRestoreLiveSession(e,n)", "patch script restores live cache during active history refresh"],
   [patchSource, "e.chatRunId=null,e.chatRunStatus=null,e.chatStream=``", "patch script clears stale run id on syncing placeholder"],
