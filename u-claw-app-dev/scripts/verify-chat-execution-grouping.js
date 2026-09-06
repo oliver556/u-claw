@@ -116,6 +116,13 @@ const checks = [
   [sessionTranscriptSource, "function uClawChatErrorDisplayText(message)", "assistant error display preserves real error details"],
   [sessionTranscriptSource, "uClawChatErrorDisplayText(message) ?? GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT", "empty assistant errors prefer real error metadata"],
   [sessionTranscriptSource, "const uClawVisibleErrorText = uClawChatErrorDisplayText(message);", "visible assistant errors are replaced with sanitized real error details"],
+  [sessionTranscriptSource, "reason = \"账户额度不足\"", "quota failures are labeled as account quota, not channel balance"],
+  [sessionTranscriptSource, "reason = \"请求频率限制\"", "rate limits are labeled without blaming a specific model"],
+  [sessionTranscriptSource, "reason = \"凭据无效或未授权\"", "auth failures are labeled without assuming only API key typo"],
+  [sessionTranscriptSource, "reason = \"权限不足或渠道未开通\"", "permission failures are labeled without assuming channel balance"],
+  [sessionTranscriptSource, "reason = \"请求参数不被支持\"", "request format failures are classified"],
+  [sessionTranscriptSource, "reason = \"上游服务异常\"", "upstream server failures are classified"],
+  [sessionTranscriptSource, "reason = \"文件或图片读取失败\"", "file and image read failures are classified"],
   [sessionTranscriptSource, "回复生成失败，未返回具体错误。请查看日志。", "assistant error fallback is localized"],
   [chatGatewaySource, "params.stopReason ?? (params.errorMessage ? \"error\" : \"stop\")", "gateway injected assistant messages can persist error stopReason"],
   [chatGatewaySource, "...params.errorMessage ? { errorMessage: params.errorMessage } : {}", "gateway injected assistant messages preserve errorMessage"],
@@ -125,6 +132,9 @@ const checks = [
   [chatGatewaySource, "idempotencyKey: `${params.runId}:error`", "persisted gateway errors are idempotent"],
   [patchSource, "function patchChatErrorDetails()", "patch script owns chat error detail preservation"],
   [patchSource, "uClawChatErrorDisplayText(message) ?? GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT", "patch script preserves real error details in history projection"],
+  [patchSource, "reason = \"账户额度不足\"", "patch script owns account quota failure label"],
+  [patchSource, "reason = \"请求频率限制\"", "patch script owns neutral rate limit label"],
+  [patchSource, "reason = \"凭据无效或未授权\"", "patch script owns neutral auth failure label"],
   [patchSource, "async function appendWebchatErrorTranscript(params)", "patch script owns gateway error transcript append"],
   [patchSource, "function uClawVisibleWebchatErrorText(value)", "patch script owns realtime gateway error display sanitizing"],
   [cssSource, "uclaw-turn-execution-grouping-19", "runtime stylesheet has execution grouping marker"],
@@ -204,6 +214,13 @@ const checks = [
 for (const [source, needle, label] of checks) {
   if (!source.includes(needle)) {
     throw new Error(`Missing ${label}: ${needle}`);
+  }
+}
+
+const misleadingErrorLabels = ["渠道余额不足", "模型暂时限流", "API Key 无效", "渠道无权限", "模型不存在或未开通"];
+for (const needle of misleadingErrorLabels) {
+  if (sessionTranscriptSource.includes(needle)) {
+    throw new Error(`Misleading assistant error label should not be present: ${needle}`);
   }
 }
 

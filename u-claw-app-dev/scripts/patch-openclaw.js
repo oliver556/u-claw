@@ -6400,13 +6400,18 @@ function uClawChatErrorDisplayText(message) {
 \tif (!text || text === "The agent run failed before producing a reply.") return;
 \tconst lower = text.toLowerCase();
 \tlet reason = "";
-\tif (/insufficient|balance|quota|billing|credit|no\\s*money|余额|额度|欠费/.test(lower)) reason = "渠道余额不足";
-\telse if (/rate.?limit|too many requests|\\b429\\b|temporarily rate-limited|限流/.test(lower)) reason = "模型暂时限流";
-\telse if (/unauthori[sz]ed|invalid api key|\\b401\\b|api key/.test(lower)) reason = "API Key 无效";
-\telse if (/forbidden|permission|\\b403\\b|无权|权限/.test(lower)) reason = "渠道无权限";
-\telse if (/model.*not.*found|not found.*model|unknown model|模型不存在/.test(lower)) reason = "模型不存在或未开通";
+\tif (/insufficient|balance|quota|billing|credit|prepay|no\\s*money|余额|额度|欠费|预扣费/.test(lower)) reason = "账户额度不足";
+\telse if (/context length|maximum context|token limit|too many tokens|maximum.*tokens|上下文|token.*过长|超出.*长度/.test(lower)) reason = "上下文过长";
+\telse if (/content policy|safety|moderation|blocked|violat|filtered|安全策略|内容违规|审核/.test(lower)) reason = "内容被安全策略拦截";
+\telse if (/rate.?limit|too many requests|\\b429\\b|temporarily rate-limited|rpm|tpm|限流|频率/.test(lower)) reason = "请求频率限制";
+\telse if (/unauthori[sz]ed|invalid api key|incorrect api key|\\b401\\b|api key|鉴权|认证失败|未授权/.test(lower)) reason = "凭据无效或未授权";
+\telse if (/forbidden|permission|\\b403\\b|无权|权限|not allowed|未开通/.test(lower)) reason = "权限不足或渠道未开通";
+\telse if (/model.*not.*found|not found.*model|unknown model|model.*disabled|model.*unavailable|模型不存在|模型.*未开通|模型不可用/.test(lower)) reason = "模型不可用";
+\telse if (/bad request|invalid request|invalid parameter|unsupported|malformed|\\b400\\b|参数|格式不支持|不支持/.test(lower)) reason = "请求参数不被支持";
+\telse if (/internal server error|server error|bad gateway|service unavailable|gateway timeout|\\b5\\d\\d\\b|上游|服务异常/.test(lower)) reason = "上游服务异常";
 \telse if (/timeout|timed out|超时/.test(lower)) reason = "请求超时";
-\telse if (/network|fetch failed|econnreset|econnrefused|etimedout|连接/.test(lower)) reason = "网络连接失败";
+\telse if (/network|fetch failed|econnreset|econnrefused|etimedout|enotfound|socket|dns|连接/.test(lower)) reason = "网络连接失败";
+\telse if (/file not found|enoent|unsupported image|image.*invalid|failed to read|read.*file|图片.*读取|文件.*读取|heic/.test(lower)) reason = "文件或图片读取失败";
 \treturn reason ? \`回复生成失败：\${reason}。\${text}\` : \`回复生成失败：\${text}\`;
 }
 const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "回复生成失败，未返回具体错误。请查看日志。";`;
@@ -6421,6 +6426,32 @@ const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "回复生成失败，未返回具
         'const GATEWAY_ASSISTANT_ERROR_FALLBACK_TEXT = "回复生成失败，未返回具体错误。请查看日志。";',
       );
     }
+    after = after.replaceAll('"渠道余额不足"', '"账户额度不足"');
+    const oldErrorReasonBlock = `\tif (/insufficient|balance|quota|billing|credit|no\\s*money|余额|额度|欠费/.test(lower)) reason = "账户额度不足";
+\telse if (/rate.?limit|too many requests|\\b429\\b|temporarily rate-limited|限流/.test(lower)) reason = "模型暂时限流";
+\telse if (/unauthori[sz]ed|invalid api key|\\b401\\b|api key/.test(lower)) reason = "API Key 无效";
+\telse if (/forbidden|permission|\\b403\\b|无权|权限/.test(lower)) reason = "渠道无权限";
+\telse if (/model.*not.*found|not found.*model|unknown model|模型不存在/.test(lower)) reason = "模型不存在或未开通";
+\telse if (/timeout|timed out|超时/.test(lower)) reason = "请求超时";
+\telse if (/network|fetch failed|econnreset|econnrefused|etimedout|连接/.test(lower)) reason = "网络连接失败";`;
+    const newErrorReasonBlock = `\tif (/insufficient|balance|quota|billing|credit|prepay|no\\s*money|余额|额度|欠费|预扣费/.test(lower)) reason = "账户额度不足";
+\telse if (/context length|maximum context|token limit|too many tokens|maximum.*tokens|上下文|token.*过长|超出.*长度/.test(lower)) reason = "上下文过长";
+\telse if (/content policy|safety|moderation|blocked|violat|filtered|安全策略|内容违规|审核/.test(lower)) reason = "内容被安全策略拦截";
+\telse if (/rate.?limit|too many requests|\\b429\\b|temporarily rate-limited|rpm|tpm|限流|频率/.test(lower)) reason = "请求频率限制";
+\telse if (/unauthori[sz]ed|invalid api key|incorrect api key|\\b401\\b|api key|鉴权|认证失败|未授权/.test(lower)) reason = "凭据无效或未授权";
+\telse if (/forbidden|permission|\\b403\\b|无权|权限|not allowed|未开通/.test(lower)) reason = "权限不足或渠道未开通";
+\telse if (/model.*not.*found|not found.*model|unknown model|model.*disabled|model.*unavailable|模型不存在|模型.*未开通|模型不可用/.test(lower)) reason = "模型不可用";
+\telse if (/bad request|invalid request|invalid parameter|unsupported|malformed|\\b400\\b|参数|格式不支持|不支持/.test(lower)) reason = "请求参数不被支持";
+\telse if (/internal server error|server error|bad gateway|service unavailable|gateway timeout|\\b5\\d\\d\\b|上游|服务异常/.test(lower)) reason = "上游服务异常";
+\telse if (/timeout|timed out|超时/.test(lower)) reason = "请求超时";
+\telse if (/network|fetch failed|econnreset|econnrefused|etimedout|enotfound|socket|dns|连接/.test(lower)) reason = "网络连接失败";
+\telse if (/file not found|enoent|unsupported image|image.*invalid|failed to read|read.*file|图片.*读取|文件.*读取|heic/.test(lower)) reason = "文件或图片读取失败";`;
+    if (after.includes(oldErrorReasonBlock)) after = after.replace(oldErrorReasonBlock, newErrorReasonBlock);
+    after = after
+      .replaceAll('"模型暂时限流"', '"请求频率限制"')
+      .replaceAll('"API Key 无效"', '"凭据无效或未授权"')
+      .replaceAll('"渠道无权限"', '"权限不足或渠道未开通"')
+      .replaceAll('"模型不存在或未开通"', '"模型不可用"');
     const sanitizeNeedle = `\tnext.content = Array.isArray(content) ? content.map((block) => sanitizeChatHistoryContentBlock(block, { maxChars: Number.MAX_SAFE_INTEGER }).block).filter((block) => {
 \t\tif (!block || typeof block !== "object" || Array.isArray(block)) return true;
 \t\tconst type = block.type;
